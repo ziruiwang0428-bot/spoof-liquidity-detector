@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from spoof_liquidity_detector.providers.base import OrderEventProvider
-from spoof_liquidity_detector.schema import OrderEvent
+from spoof_liquidity_detector.providers.archive import HttpArchiveProvider
+
+DEFAULT_POLYMARKET_ARCHIVE_URL = "https://archive.pmxt.dev/Polymarket/v2/"
 
 
-class PolymarketProvider(OrderEventProvider):
-    """Placeholder adapter for a Polymarket or third-party data vendor feed."""
+class PolymarketProvider(HttpArchiveProvider):
+    """Adapter for PMXT's Polymarket archive endpoint."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key
-
-    def load_events(self) -> list[OrderEvent]:
-        raise NotImplementedError(
-            "Wire the vendor's Polymarket order-event endpoint here and return normalized OrderEvent objects."
-        )
+    def __init__(self, base_url: str = DEFAULT_POLYMARKET_ARCHIVE_URL, timeout_seconds: float = 30.0) -> None:
+        super().__init__(base_url=base_url, venue="polymarket", timeout_seconds=timeout_seconds)
