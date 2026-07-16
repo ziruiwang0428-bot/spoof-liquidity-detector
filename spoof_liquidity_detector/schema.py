@@ -77,3 +77,44 @@ class DetectionResult:
     z_score: float
     reasons: tuple[str, ...]
     features: OrderFeatures
+
+
+@dataclass(frozen=True)
+class AccountEconomics:
+    maker: str
+    subsidy: float
+    cost: float
+    capital: float
+    period_days: float
+
+    @property
+    def net_profit(self) -> float:
+        return self.subsidy - self.cost
+
+    @property
+    def annualized_return(self) -> float:
+        if self.capital <= 0 or self.period_days <= 0:
+            return 0.0
+        return self.net_profit / self.capital * 365.0 / self.period_days
+
+
+@dataclass(frozen=True)
+class AccountRiskProfile:
+    maker: str
+    venue: str
+    markets: tuple[str, ...]
+    order_count: int
+    cancel_rate: float
+    fill_rate: float
+    near_touch_cancel_rate: float
+    far_order_ratio: float
+    average_distance_bps: float
+    average_price_to_mid_ratio: float
+    total_notional: float
+    average_order_risk: float
+    subsidy: float
+    cost: float
+    net_profit: float
+    annualized_return: float
+    account_risk_score: float
+    reasons: tuple[str, ...]
