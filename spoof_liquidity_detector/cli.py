@@ -46,7 +46,7 @@ def _format_order_table(rows) -> str:
 
 
 def _format_account_table(rows) -> str:
-    headers = ["risk", "maker", "orders", "avoid", "far", "profit", "apy", "px_dev", "reasons"]
+    headers = ["risk", "maker", "orders", "avoid", "far_order_ratio", "profit", "apy", "reasons"]
     lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _account_widths()))]
     for row in rows:
         values = [
@@ -57,7 +57,6 @@ def _format_account_table(rows) -> str:
             f"{row.far_order_ratio:.2%}",
             f"{row.net_profit:.2f}",
             f"{row.annualized_return:.2%}",
-            f"{row.average_price_to_mid_ratio:.4f}",
             ",".join(row.reasons),
         ]
         lines.append("  ".join(value.ljust(width) for value, width in zip(values, _account_widths())))
@@ -69,7 +68,7 @@ def _order_widths() -> list[int]:
 
 
 def _account_widths() -> list[int]:
-    return [7, 12, 6, 8, 8, 10, 9, 11, 64]
+    return [7, 12, 6, 8, 15, 10, 9, 64]
 
 
 if __name__ == "__main__":

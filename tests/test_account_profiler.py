@@ -16,8 +16,8 @@ class AccountProfilerTest(unittest.TestCase):
         self.assertGreater(profiles[0].account_risk_score, 0.8)
         self.assertIn("avoids_execution_near_touch", profiles[0].reasons)
         self.assertIn("subsidy_positive_after_cost", profiles[0].reasons)
+        self.assertEqual(profiles[0].far_order_ratio, 1.0)
         self.assertGreater(profiles[0].annualized_return, 1.0)
-        self.assertGreater(profiles[0].average_price_to_mid_ratio, 0.04)
 
     def test_account_profiles_keep_real_filled_maker_lower_risk(self):
         provider = CsvOrderEventProvider(Path("data/sample_order_events.csv"))
