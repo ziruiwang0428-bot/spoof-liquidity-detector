@@ -12,7 +12,8 @@ The project scores both order-level behavior and maker/account-level behavior. I
 Important distinction:
 
 - The Polymarket PMXT URL is a real archive endpoint. The CLI can list and download archive snapshots from it.
-- The Pendle URL is a real app page, not a normalized order-event API. To run detection on Pendle, export or vendor-provide open/cancel/fill events in the normalized CSV schema below.
+- The Pendle app uses public backend endpoints under `https://api-v2.pendle.finance/bff`. The CLI can fetch raw incentive configs, raw limit orders, and aggregated order-book entries from those endpoints.
+- To run the spoof-liquidity detector itself on Pendle, raw implied-APY limit-order responses still need to be converted into the normalized open/cancel/fill event schema below.
 
 ## Quick Start
 
@@ -37,7 +38,19 @@ python -m spoof_liquidity_detector.cli --provider polymarket-archive --download-
 Check the configured Pendle source:
 
 ```bash
-python -m spoof_liquidity_detector.cli --provider pendle
+python -m spoof_liquidity_detector.cli --provider pendle --list-incentives --top 10
+```
+
+List recent raw Pendle limit orders:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider pendle --list-orders --chain-id 42161 --active true --top 10
+```
+
+List a Pendle market order book:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider pendle --order-book --chain-id 42161 --market <market-address> --top 10
 ```
 
 ## Detection Metrics
@@ -100,7 +113,7 @@ Optional account economics CSV:
 spoof_liquidity_detector/
   accounts/                 # Maker/account-level economics and risk profiling
   features/                 # Order lifecycle feature engineering
-  providers/                # CSV, Pendle placeholder, and Polymarket archive providers
+  providers/                # CSV, Pendle backend, and Polymarket archive providers
   statistics/               # Order-level statistical scoring
   cli.py                    # Command-line entry point
   pipeline.py               # Detection pipeline

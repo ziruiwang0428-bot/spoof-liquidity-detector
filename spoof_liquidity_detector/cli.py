@@ -23,6 +23,13 @@ def main() -> None:
     parser.add_argument("--download-snapshot", help="Download one archive snapshot by exact file name.")
     parser.add_argument("--output-dir", default="data/raw", help="Directory for downloaded archive snapshots.")
     parser.add_argument("--top", type=int, default=10, help="Number of highest-risk orders to print.")
+    parser.add_argument("--list-incentives", action="store_true", help="List Pendle limit-order incentive configs.")
+    parser.add_argument("--list-orders", action="store_true", help="List raw Pendle limit orders.")
+    parser.add_argument("--order-book", action="store_true", help="List Pendle aggregated limit-order book entries.")
+    parser.add_argument("--chain-id", type=int, help="Pendle chain ID, for example 42161 for Arbitrum.")
+    parser.add_argument("--market", help="Pendle market address for --order-book.")
+    parser.add_argument("--maker", help="Optional Pendle maker address filter for --list-orders.")
+    parser.add_argument("--active", choices=["true", "false", "all"], default="true", help="Pendle active-order filter.")
     args = parser.parse_args()
 
     if args.provider == "polymarket-archive":
@@ -30,7 +37,7 @@ def main() -> None:
         return
 
     if args.provider == "pendle":
-        _run_pendle()
+        _run_pendle(args)
         return
 
     if not args.input:
@@ -71,12 +78,34 @@ def _run_polymarket_archive(args) -> None:
     )
 
 
-def _run_pendle() -> None:
+def _run_pendle(args) -> None:
     provider = PendleProvider()
+    if args.list_incentives:
+        configs = provider.list_incentive_configs()
+        print(_format_pendle_incentives(configs[: args.top]))
+        return
+
+    if args.list_orders:
+        is_active = None if args.active == "all" else args.active == "true"
+        payload = provider.fetch_limit_orders(
+            chain_id=args.chain_id,
+            limit=args.top,
+            is_active=is_active,
+            maker=args.maker,
+        )
+        print(_format_pendle_orders(payload.get("results", [])))
+        return
+
+    if args.order_book:
+        if args.chain_id is None or not args.market:
+            raise SystemExit("--chain-id and --market are required with --provider pendle --order-book")
+        payload = provider.fetch_order_book(chain_id=args.chain_id, market=args.market, limit=args.top)
+        print(_format_pendle_order_book(payload, args.top))
+        return
+
     raise SystemExit(
-        f"Pendle source configured: {provider.source_url}. "
-        "This is the real limit-order app URL, but it is not a normalized order-event API. "
-        "Provide a Pendle API/vendor CSV with open/cancel/fill events via --provider csv --input <file>."
+        f"Pendle source configured: {provider.source_url}. Use --list-incentives, --list-orders, or --order-book. "
+        "Run detection after converting raw Pendle implied-APY orders into normalized open/cancel/fill events."
     )
 
 
@@ -125,6 +154,77 @@ def _format_account_table(rows) -> str:
     return "\n".join(lines)
 
 
+def _format_pendle_incentives(rows) -> str:
+    headers = ["chain", "market", "implied_apy", "range", "buy_yt_apr", "sell_pt_apr"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _pendle_incentive_widths()))]
+    for row in rows:
+        estimated_apr = row.get("estimatedApr") or {}
+        values = [
+            str(row.get("chainId", "")),
+            _shorten(row.get("marketAddress", "")),
+            _format_decimal(row.get("impliedApy")),
+            _format_decimal((row.get("long") or {}).get("range")),
+            _format_decimal(estimated_apr.get("buyYtApr")),
+            _format_decimal(estimated_apr.get("sellPtApr")),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _pendle_incentive_widths())))
+    return "\n".join(lines)
+
+
+def _format_pendle_orders(rows) -> str:
+    headers = ["id", "chain", "maker", "type", "status", "active", "canceled", "notional_usd", "latest_event"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _pendle_order_widths()))]
+    for row in rows:
+        order_state = row.get("orderState") or {}
+        values = [
+            _shorten(row.get("id", "")),
+            str(row.get("chainId", "")),
+            _shorten(row.get("maker", "")),
+            str(order_state.get("orderType", row.get("type", ""))),
+            str(row.get("status", "")),
+            str(row.get("isActive", "")),
+            str(row.get("isCanceled", "")),
+            _format_decimal(order_state.get("notionalVolumeUSD")),
+            str(row.get("latestEventTimestamp", "")),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _pendle_order_widths())))
+    return "\n".join(lines)
+
+
+def _format_pendle_order_book(payload, top: int) -> str:
+    headers = ["side", "implied_apy", "py_size", "notional_size", "qualified_py_size"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _pendle_book_widths()))]
+    entries = []
+    entries.extend(("long", row) for row in payload.get("longYieldEntries", [])[:top])
+    entries.extend(("short", row) for row in payload.get("shortYieldEntries", [])[:top])
+    for side, row in entries:
+        values = [
+            side,
+            _format_decimal(row.get("impliedApy")),
+            _format_decimal(row.get("pySize")),
+            _format_decimal(row.get("notionalSize")),
+            _format_decimal(row.get("incentiveQualifiedPySize")),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _pendle_book_widths())))
+    return "\n".join(lines)
+
+
+def _shorten(value: object, prefix: int = 8, suffix: int = 4) -> str:
+    text = str(value)
+    if len(text) <= prefix + suffix + 3:
+        return text
+    return f"{text[:prefix]}...{text[-suffix:]}"
+
+
+def _format_decimal(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        return f"{float(value):.6g}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _order_widths() -> list[int]:
     return [7, 8, 6, 10, 12, 9, 18, 48]
 
@@ -135,6 +235,18 @@ def _account_widths() -> list[int]:
 
 def _archive_widths() -> list[int]:
     return [12, 8, 36, 80]
+
+
+def _pendle_incentive_widths() -> list[int]:
+    return [7, 15, 12, 10, 12, 12]
+
+
+def _pendle_order_widths() -> list[int]:
+    return [15, 7, 15, 16, 12, 8, 9, 13, 24]
+
+
+def _pendle_book_widths() -> list[int]:
+    return [7, 12, 14, 16, 18]
 
 
 if __name__ == "__main__":
