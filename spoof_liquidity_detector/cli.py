@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from spoof_liquidity_detector.accounts import load_account_economics
 from spoof_liquidity_detector.pipeline import DetectionPipeline
-from spoof_liquidity_detector.providers import ArchiveSnapshot, CsvOrderEventProvider, PendleProvider, PolymarketProvider
+from spoof_liquidity_detector.providers import (
+    ArchiveSnapshot,
+    CsvOrderEventProvider,
+    PendleProvider,
+    PolymarketLiveProvider,
+    PolymarketProvider,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Detect suspicious fleeting liquidity from order events.")
     parser.add_argument(
         "--provider",
-        choices=["csv", "polymarket-archive", "pendle"],
+        choices=["csv", "polymarket", "polymarket-archive", "pendle"],
         default="csv",
         help="Data source to use. CSV runs detection; archive providers expose real data files.",
     )
@@ -28,12 +35,17 @@ def main() -> None:
     parser.add_argument("--order-book", action="store_true", help="List Pendle aggregated limit-order book entries.")
     parser.add_argument("--chain-id", type=int, help="Pendle chain ID, for example 42161 for Arbitrum.")
     parser.add_argument("--market", help="Pendle market address for --order-book.")
+    parser.add_argument("--token-id", help="Polymarket CLOB token ID for --order-book.")
     parser.add_argument("--maker", help="Optional Pendle maker address filter for --list-orders.")
     parser.add_argument("--active", choices=["true", "false", "all"], default="true", help="Pendle active-order filter.")
     args = parser.parse_args()
 
     if args.provider == "polymarket-archive":
         _run_polymarket_archive(args)
+        return
+
+    if args.provider == "polymarket":
+        _run_polymarket_live(args)
         return
 
     if args.provider == "pendle":
@@ -75,6 +87,26 @@ def _run_polymarket_archive(args) -> None:
     raise SystemExit(
         "Polymarket archive is a real snapshot source. Use --list-snapshots or --download-snapshot. "
         "Convert downloaded snapshots into normalized order-event CSV before running account detection."
+    )
+
+
+def _run_polymarket_live(args) -> None:
+    provider = PolymarketLiveProvider()
+    if args.list_orders:
+        markets = provider.list_markets(limit=args.top)
+        print(_format_polymarket_markets(markets))
+        return
+
+    if args.order_book:
+        if not args.token_id:
+            raise SystemExit("--token-id is required with --provider polymarket --order-book")
+        payload = provider.fetch_order_book(token_id=args.token_id)
+        print(_format_polymarket_order_book(payload, args.top))
+        return
+
+    raise SystemExit(
+        "Polymarket live source configured. Use --list-orders to list active Gamma markets with CLOB token IDs, "
+        "or --order-book --token-id <clob-token-id> to fetch an aggregated CLOB order book."
     )
 
 
@@ -209,6 +241,60 @@ def _format_pendle_order_book(payload, top: int) -> str:
     return "\n".join(lines)
 
 
+def _format_polymarket_markets(rows) -> str:
+    headers = ["id", "question", "tokens", "bid", "ask", "liquidity", "volume24h"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _polymarket_market_widths()))]
+    for row in rows:
+        values = [
+            str(row.get("id", "")),
+            _clip(str(row.get("question", "")), 42),
+            _clip(_parse_token_ids(row.get("clobTokenIds")), 34),
+            _format_decimal(row.get("bestBid")),
+            _format_decimal(row.get("bestAsk")),
+            _format_decimal(row.get("liquidityNum", row.get("liquidity"))),
+            _format_decimal(row.get("volume24hr")),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _polymarket_market_widths())))
+    return "\n".join(lines)
+
+
+def _format_polymarket_order_book(payload, top: int) -> str:
+    headers = ["side", "price", "size", "token_id", "timestamp"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _polymarket_book_widths()))]
+    token_id = payload.get("asset_id", "")
+    timestamp = str(payload.get("timestamp", ""))
+    for side_name in ("bids", "asks"):
+        side = "bid" if side_name == "bids" else "ask"
+        for row in payload.get(side_name, [])[:top]:
+            values = [
+                side,
+                _format_decimal(row.get("price")),
+                _format_decimal(row.get("size")),
+                _shorten(token_id, prefix=10, suffix=6),
+                timestamp,
+            ]
+            lines.append("  ".join(value.ljust(width) for value, width in zip(values, _polymarket_book_widths())))
+    return "\n".join(lines)
+
+
+def _parse_token_ids(value: object) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, list):
+        tokens = [str(item) for item in value]
+    else:
+        try:
+            parsed = json.loads(str(value))
+            tokens = [str(item) for item in parsed] if isinstance(parsed, list) else [str(value)]
+        except (json.JSONDecodeError, TypeError):
+            tokens = [str(value)]
+    return ",".join(_shorten(token, prefix=6, suffix=6) for token in tokens)
+
+
+def _clip(value: str, width: int) -> str:
+    return value if len(value) <= width else f"{value[: width - 3]}..."
+
+
 def _shorten(value: object, prefix: int = 8, suffix: int = 4) -> str:
     text = str(value)
     if len(text) <= prefix + suffix + 3:
@@ -247,6 +333,14 @@ def _pendle_order_widths() -> list[int]:
 
 def _pendle_book_widths() -> list[int]:
     return [7, 12, 14, 16, 18]
+
+
+def _polymarket_market_widths() -> list[int]:
+    return [8, 44, 36, 8, 8, 11, 10]
+
+
+def _polymarket_book_widths() -> list[int]:
+    return [7, 8, 12, 20, 15]
 
 
 if __name__ == "__main__":

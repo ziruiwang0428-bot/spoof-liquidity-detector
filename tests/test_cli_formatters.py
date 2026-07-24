@@ -1,6 +1,13 @@
 import unittest
 
-from spoof_liquidity_detector.cli import _format_archive_table, _format_pendle_incentives, _format_pendle_order_book, _format_pendle_orders
+from spoof_liquidity_detector.cli import (
+    _format_archive_table,
+    _format_pendle_incentives,
+    _format_pendle_order_book,
+    _format_pendle_orders,
+    _format_polymarket_markets,
+    _format_polymarket_order_book,
+)
 from spoof_liquidity_detector.providers import ArchiveSnapshot
 
 
@@ -70,6 +77,40 @@ class CliFormatterTest(unittest.TestCase):
         self.assertIn("long", table)
         self.assertIn("short", table)
         self.assertIn("0.06335", table)
+
+    def test_formats_polymarket_markets(self):
+        table = _format_polymarket_markets(
+            [
+                {
+                    "id": "540817",
+                    "question": "New Rihanna Album before GTA VI?",
+                    "clobTokenIds": '["98022490269692409998126496127597032490334070080325855126491859374983463996227"]',
+                    "bestBid": "0.50",
+                    "bestAsk": "0.53",
+                    "liquidityNum": "9893.5129",
+                    "volume24hr": "408.611754",
+                }
+            ]
+        )
+
+        self.assertIn("540817", table)
+        self.assertIn("New Rihanna Album", table)
+        self.assertIn("980224", table)
+
+    def test_formats_polymarket_order_book(self):
+        table = _format_polymarket_order_book(
+            {
+                "asset_id": "98022490269692409998126496127597032490334070080325855126491859374983463996227",
+                "timestamp": "1784883097483",
+                "bids": [{"price": "0.50", "size": "4366.52"}],
+                "asks": [{"price": "0.53", "size": "8.68"}],
+            },
+            top=1,
+        )
+
+        self.assertIn("bid", table)
+        self.assertIn("ask", table)
+        self.assertIn("4366.52", table)
 
 
 if __name__ == "__main__":

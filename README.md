@@ -8,12 +8,15 @@ The project scores both order-level behavior and maker/account-level behavior. I
 
 - Pendle limit-order app: https://app.pendle.finance/limit-order
 - Polymarket PMXT archive: https://archive.pmxt.dev/Polymarket/v2/
+- Polymarket Gamma API: https://gamma-api.polymarket.com
+- Polymarket CLOB API: https://clob.polymarket.com
 
 Important distinction:
 
-- The Polymarket PMXT URL is a real archive endpoint. The CLI can list and download archive snapshots from it.
+- The Polymarket Gamma and CLOB APIs can list active markets and fetch aggregated order books by CLOB token ID.
+- The Polymarket PMXT URL is a real archive endpoint. The CLI can also list and download archive snapshots from it.
 - The Pendle app uses public backend endpoints under `https://api-v2.pendle.finance/bff`. The CLI can fetch raw incentive configs, raw limit orders, and aggregated order-book entries from those endpoints.
-- To run the spoof-liquidity detector itself on Pendle, raw implied-APY limit-order responses still need to be converted into the normalized open/cancel/fill event schema below.
+- To run the spoof-liquidity detector itself on Pendle or Polymarket account-level behavior, raw venue responses still need to be converted into the normalized open/cancel/fill event schema below.
 
 ## Quick Start
 
@@ -27,6 +30,18 @@ List real Polymarket archive snapshots:
 
 ```bash
 python -m spoof_liquidity_detector.cli --provider polymarket-archive --list-snapshots --top 20
+```
+
+List live Polymarket markets with CLOB token IDs:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider polymarket --list-orders --top 10
+```
+
+Fetch a live Polymarket CLOB order book:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider polymarket --order-book --token-id <clob-token-id> --top 10
 ```
 
 Download one real Polymarket archive snapshot:
