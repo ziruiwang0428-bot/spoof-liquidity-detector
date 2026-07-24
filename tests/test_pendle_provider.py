@@ -12,6 +12,43 @@ class FakePendleProvider(PendleProvider):
         self.calls.append((path, query))
         if path == "/v1/limit-orders/incentive/configs":
             return {"configs": [{"chainId": 42161}]}
+        if path == "/v1/limit-orders" and query and query.get("isActive") == "true":
+            return {
+                "results": [
+                    {
+                        "id": "0xactive",
+                        "maker": "0xmakerA",
+                        "chainId": 42161,
+                        "yt": "0xmarket",
+                        "lnImpliedRate": "100000000000000000",
+                        "createdAt": "2026-07-24T09:00:00.000Z",
+                        "latestEventTimestamp": "2026-07-24T09:00:00.000Z",
+                        "isActive": True,
+                        "isCanceled": False,
+                        "status": "FILLABLE",
+                        "orderState": {"orderType": "LONG_YIELD", "notionalVolumeUSD": "1000"},
+                    }
+                ]
+            }
+        if path == "/v1/limit-orders" and query and query.get("isActive") == "false":
+            return {
+                "results": [
+                    {
+                        "id": "0xcancelled",
+                        "maker": "0xmakerB",
+                        "chainId": 42161,
+                        "yt": "0xmarket",
+                        "lnImpliedRate": "120000000000000000",
+                        "createdAt": "2026-07-24T09:00:00.000Z",
+                        "latestEventTimestamp": "2026-07-24T09:01:00.000Z",
+                        "isActive": False,
+                        "isCanceled": True,
+                        "status": "CANCELED",
+                        "orderFilledStatus": {"notionalVolume": "0"},
+                        "orderState": {"orderType": "SHORT_YIELD", "notionalVolumeUSD": "1200"},
+                    }
+                ]
+            }
         return {"results": []}
 
 
@@ -41,6 +78,18 @@ class PendleProviderTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             provider.fetch_order_book(chain_id=42161, market="0xmarket", precision_decimal=4)
+
+    def test_load_events_converts_live_orders_to_order_events(self):
+        provider = FakePendleProvider()
+
+        events = provider.load_events()
+
+        self.assertEqual([event.order_id for event in events], ["0xactive", "0xcancelled", "0xcancelled"])
+        self.assertEqual([event.event_type for event in events], ["open", "open", "cancel"])
+        self.assertEqual(events[0].venue, "pendle")
+        self.assertEqual(events[0].market, "0xmarket")
+        self.assertEqual(events[0].price, 0.1)
+        self.assertEqual(events[2].side, "sell")
 
 
 if __name__ == "__main__":

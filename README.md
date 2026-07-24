@@ -62,6 +62,12 @@ List recent raw Pendle limit orders:
 python -m spoof_liquidity_detector.cli --provider pendle --list-orders --chain-id 42161 --active true --top 10
 ```
 
+Run account-level detection on live Pendle orders:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --fetch-limit 100 --top 10
+```
+
 List a Pendle market order book:
 
 ```bash

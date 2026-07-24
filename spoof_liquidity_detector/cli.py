@@ -30,6 +30,7 @@ def main() -> None:
     parser.add_argument("--download-snapshot", help="Download one archive snapshot by exact file name.")
     parser.add_argument("--output-dir", default="data/raw", help="Directory for downloaded archive snapshots.")
     parser.add_argument("--top", type=int, default=10, help="Number of highest-risk orders to print.")
+    parser.add_argument("--fetch-limit", type=int, default=100, help="Number of raw live orders to fetch before detection.")
     parser.add_argument("--list-incentives", action="store_true", help="List Pendle limit-order incentive configs.")
     parser.add_argument("--list-orders", action="store_true", help="List raw Pendle limit orders.")
     parser.add_argument("--order-book", action="store_true", help="List Pendle aggregated limit-order book entries.")
@@ -111,7 +112,7 @@ def _run_polymarket_live(args) -> None:
 
 
 def _run_pendle(args) -> None:
-    provider = PendleProvider()
+    provider = PendleProvider(chain_id=args.chain_id, order_limit=args.fetch_limit)
     if args.list_incentives:
         configs = provider.list_incentive_configs()
         print(_format_pendle_incentives(configs[: args.top]))
@@ -135,10 +136,14 @@ def _run_pendle(args) -> None:
         print(_format_pendle_order_book(payload, args.top))
         return
 
-    raise SystemExit(
-        f"Pendle source configured: {provider.source_url}. Use --list-incentives, --list-orders, or --order-book. "
-        "Run detection after converting raw Pendle implied-APY orders into normalized open/cancel/fill events."
-    )
+    pipeline = DetectionPipeline(provider)
+    if args.mode == "accounts":
+        economics = load_account_economics(args.economics) if args.economics else None
+        results = pipeline.run_accounts(economics=economics)
+        print(_format_account_table(results[: args.top]))
+    else:
+        results = pipeline.run()
+        print(_format_order_table(results[: args.top]))
 
 
 def _format_archive_table(rows: list[ArchiveSnapshot]) -> str:
@@ -312,11 +317,11 @@ def _format_decimal(value: object) -> str:
 
 
 def _order_widths() -> list[int]:
-    return [7, 8, 6, 10, 12, 9, 18, 48]
+    return [7, 8, 6, 15, 44, 9, 18, 48]
 
 
 def _account_widths() -> list[int]:
-    return [7, 12, 6, 8, 15, 10, 9, 64]
+    return [7, 44, 6, 8, 15, 10, 9, 64]
 
 
 def _archive_widths() -> list[int]:
