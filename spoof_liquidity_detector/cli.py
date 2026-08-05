@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from spoof_liquidity_detector.accounts import load_account_economics
+from spoof_liquidity_detector.accounts import AccountProfiler, load_account_economics
 from spoof_liquidity_detector.pipeline import DetectionPipeline
 from spoof_liquidity_detector.providers import (
     ArchiveSnapshot,
@@ -146,8 +146,13 @@ def _run_pendle(args) -> None:
 
     pipeline = DetectionPipeline(provider)
     if args.mode == "accounts":
-        economics = load_account_economics(args.economics) if args.economics else None
-        results = pipeline.run_accounts(economics=economics)
+        order_results = pipeline.run()
+        if args.economics:
+            economics = load_account_economics(args.economics)
+        else:
+            makers = sorted({result.maker for result in order_results})
+            economics = provider.fetch_account_economics(makers)
+        results = AccountProfiler().profile(order_results, economics=economics)
         print(_format_account_table(results[: args.top]))
     else:
         results = pipeline.run()

@@ -11,11 +11,12 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from spoof_liquidity_detector.providers.base import OrderEventProvider
-from spoof_liquidity_detector.schema import OrderEvent
+from spoof_liquidity_detector.schema import AccountEconomics, OrderEvent
 
 DEFAULT_PENDLE_LIMIT_ORDER_URL = "https://app.pendle.finance/limit-order"
 DEFAULT_PENDLE_API_BASE_URL = "https://api-v2.pendle.finance/bff"
 DEFAULT_PENDLE_SDK_UI_VERSION = "1.0.0"
+MAX_PENDLE_SKIP = 1000
 
 
 class PendleProvider(OrderEventProvider):
@@ -46,6 +47,32 @@ class PendleProvider(OrderEventProvider):
     def list_incentive_configs(self) -> list[dict[str, Any]]:
         payload = self._get("/v1/limit-orders/incentive/configs")
         return list(payload.get("configs", []))
+
+    def fetch_user_incentive_aggregate(self, *, user: str) -> dict[str, Any]:
+        query: dict[str, Any] = {"user": user}
+        if self.chain_id is not None:
+            query["chainId"] = self.chain_id
+        return self._get("/v1/limit-orders/incentive/user/aggregate", query)
+
+    def fetch_user_reward_history(self, *, user: str) -> dict[str, Any]:
+        query: dict[str, Any] = {"user": user}
+        if self.chain_id is not None:
+            query["chainId"] = self.chain_id
+        return self._get("/v1/limit-orders/incentive/user/reward-history", query)
+
+    def fetch_account_economics(self, makers: list[str]) -> dict[str, AccountEconomics]:
+        economics: dict[str, AccountEconomics] = {}
+        for maker in makers:
+            history = self.fetch_user_reward_history(user=maker)
+            aggregate = self.fetch_user_incentive_aggregate(user=maker)
+            economics[maker] = _reward_payload_to_economics(
+                maker=maker,
+                history=history,
+                aggregate=aggregate,
+                chain_id=self.chain_id,
+                lookback_days=self.lookback_days,
+            )
+        return economics
 
     def fetch_limit_orders(
         self,
@@ -131,7 +158,7 @@ class PendleProvider(OrderEventProvider):
         skip = 0
         page_count = 0
 
-        while len(rows) < self.order_limit and page_count < self.max_pages:
+        while len(rows) < self.order_limit and page_count < self.max_pages and skip <= MAX_PENDLE_SKIP:
             page_limit = min(self.page_size, self.order_limit - len(rows))
             payload = self.fetch_limit_orders(
                 chain_id=self.chain_id,
@@ -309,3 +336,62 @@ def _float_or_zero(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _reward_payload_to_economics(
+    *,
+    maker: str,
+    history: dict[str, Any],
+    aggregate: dict[str, Any],
+    chain_id: int | None,
+    lookback_days: float | None,
+) -> AccountEconomics:
+    cutoff = None
+    if lookback_days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+
+    subsidy = 0.0
+    capital_samples: list[float] = []
+    start_dates: list[datetime] = []
+    end_dates: list[datetime] = []
+
+    for epoch in history.get("epochs", []):
+        start = _parse_timestamp(epoch.get("startEpochDate"))
+        end = _parse_timestamp(epoch.get("endEpochDate"))
+        if cutoff is not None and end < cutoff:
+            continue
+
+        epoch_reward = 0.0
+        epoch_capital = 0.0
+        for market in epoch.get("markets", []):
+            if chain_id is not None and int(market.get("chainId", 0)) != chain_id:
+                continue
+            epoch_reward += _float_or_zero(market.get("myReward"))
+            epoch_capital += _float_or_zero(market.get("averageMakingOrderValueUsd"))
+
+        if epoch_reward > 0 or epoch_capital > 0:
+            subsidy += epoch_reward
+            capital_samples.append(epoch_capital)
+            start_dates.append(start)
+            end_dates.append(end)
+
+    if capital_samples:
+        capital = sum(capital_samples) / len(capital_samples)
+    else:
+        capital = _float_or_zero(aggregate.get("userMakingAmountUsdIncentivized"))
+
+    if start_dates and end_dates:
+        period_days = max((max(end_dates) - min(start_dates)).total_seconds() / 86_400, 1.0)
+    else:
+        period_days = max(lookback_days or 7.0, 1.0)
+
+    if subsidy == 0.0:
+        subsidy = _float_or_zero(aggregate.get("currentEpochReward"))
+
+    return AccountEconomics(
+        maker=maker,
+        subsidy=subsidy,
+        cost=0.0,
+        capital=capital,
+        period_days=period_days,
+    )

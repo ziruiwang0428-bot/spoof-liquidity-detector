@@ -68,6 +68,8 @@ Run account-level detection on live Pendle orders:
 python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --fetch-limit 100 --top 10
 ```
 
+When `--provider pendle --mode accounts` is used without a local `--economics` CSV, the CLI fetches Pendle's live reward-history and user incentive aggregate endpoints to estimate `profit` and `apy`.
+
 Scan a live Pendle history window:
 
 ```bash

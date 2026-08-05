@@ -12,6 +12,32 @@ class FakePendleProvider(PendleProvider):
         self.calls.append((path, query))
         if path == "/v1/limit-orders/incentive/configs":
             return {"configs": [{"chainId": 42161}]}
+        if path == "/v1/limit-orders/incentive/user/aggregate":
+            return {
+                "currentEpochReward": 2.0,
+                "userMakingAmountUsdIncentivized": 100.0,
+            }
+        if path == "/v1/limit-orders/incentive/user/reward-history":
+            return {
+                "epochs": [
+                    {
+                        "startEpochDate": "2026-07-24T00:00:00.000Z",
+                        "endEpochDate": "2026-07-31T00:00:00.000Z",
+                        "markets": [
+                            {
+                                "chainId": 42161,
+                                "myReward": 7.0,
+                                "averageMakingOrderValueUsd": 100.0,
+                            },
+                            {
+                                "chainId": 1,
+                                "myReward": 99.0,
+                                "averageMakingOrderValueUsd": 999.0,
+                            },
+                        ],
+                    }
+                ]
+            }
         if path == "/v1/limit-orders" and query and query.get("skip", 0) > 0:
             return {"results": []}
         if path == "/v1/limit-orders" and query and query.get("isActive") == "true":
@@ -100,6 +126,16 @@ class PendleProviderTest(unittest.TestCase):
         events = provider.load_events()
 
         self.assertEqual(events, [])
+
+    def test_fetch_account_economics_uses_reward_history(self):
+        provider = FakePendleProvider()
+        provider.chain_id = 42161
+
+        economics = provider.fetch_account_economics(["0xmakerA"])
+
+        self.assertEqual(economics["0xmakerA"].subsidy, 7.0)
+        self.assertEqual(economics["0xmakerA"].capital, 100.0)
+        self.assertEqual(round(economics["0xmakerA"].annualized_return, 2), 3.65)
 
 
 if __name__ == "__main__":
