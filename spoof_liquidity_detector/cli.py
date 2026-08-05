@@ -31,6 +31,9 @@ def main() -> None:
     parser.add_argument("--output-dir", default="data/raw", help="Directory for downloaded archive snapshots.")
     parser.add_argument("--top", type=int, default=10, help="Number of highest-risk orders to print.")
     parser.add_argument("--fetch-limit", type=int, default=100, help="Number of raw live orders to fetch before detection.")
+    parser.add_argument("--lookback", choices=["day", "week", "month"], help="Pendle history window shortcut.")
+    parser.add_argument("--lookback-days", type=float, help="Pendle history window in days.")
+    parser.add_argument("--max-pages", type=int, default=25, help="Maximum Pendle API pages to scan per active/inactive side.")
     parser.add_argument("--list-incentives", action="store_true", help="List Pendle limit-order incentive configs.")
     parser.add_argument("--list-orders", action="store_true", help="List raw Pendle limit orders.")
     parser.add_argument("--order-book", action="store_true", help="List Pendle aggregated limit-order book entries.")
@@ -112,7 +115,12 @@ def _run_polymarket_live(args) -> None:
 
 
 def _run_pendle(args) -> None:
-    provider = PendleProvider(chain_id=args.chain_id, order_limit=args.fetch_limit)
+    provider = PendleProvider(
+        chain_id=args.chain_id,
+        order_limit=args.fetch_limit,
+        lookback_days=_lookback_days(args),
+        max_pages=args.max_pages,
+    )
     if args.list_incentives:
         configs = provider.list_incentive_configs()
         print(_format_pendle_incentives(configs[: args.top]))
@@ -153,6 +161,18 @@ def _format_archive_table(rows: list[ArchiveSnapshot]) -> str:
         values = [row.venue, row.format, row.name, row.url]
         lines.append("  ".join(value.ljust(width) for value, width in zip(values, _archive_widths())))
     return "\n".join(lines)
+
+
+def _lookback_days(args) -> float | None:
+    if args.lookback_days is not None:
+        return args.lookback_days
+    if args.lookback == "day":
+        return 1.0
+    if args.lookback == "week":
+        return 7.0
+    if args.lookback == "month":
+        return 30.0
+    return None
 
 
 def _format_order_table(rows) -> str:

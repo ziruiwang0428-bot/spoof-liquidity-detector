@@ -12,6 +12,8 @@ class FakePendleProvider(PendleProvider):
         self.calls.append((path, query))
         if path == "/v1/limit-orders/incentive/configs":
             return {"configs": [{"chainId": 42161}]}
+        if path == "/v1/limit-orders" and query and query.get("skip", 0) > 0:
+            return {"results": []}
         if path == "/v1/limit-orders" and query and query.get("isActive") == "true":
             return {
                 "results": [
@@ -90,6 +92,14 @@ class PendleProviderTest(unittest.TestCase):
         self.assertEqual(events[0].market, "0xmarket")
         self.assertEqual(events[0].price, 0.1)
         self.assertEqual(events[2].side, "sell")
+
+    def test_lookback_filters_old_orders(self):
+        provider = FakePendleProvider()
+        provider.lookback_days = 0.001
+
+        events = provider.load_events()
+
+        self.assertEqual(events, [])
 
 
 if __name__ == "__main__":

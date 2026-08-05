@@ -68,6 +68,14 @@ Run account-level detection on live Pendle orders:
 python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --fetch-limit 100 --top 10
 ```
 
+Scan a live Pendle history window:
+
+```bash
+python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --lookback day --fetch-limit 200 --top 10
+python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --lookback week --fetch-limit 500 --top 10
+python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --lookback month --fetch-limit 1000 --max-pages 50 --top 10
+```
+
 List a Pendle market order book:
 
 ```bash

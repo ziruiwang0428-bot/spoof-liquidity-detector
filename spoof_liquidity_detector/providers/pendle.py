@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import ssl
+from datetime import datetime, timedelta, timezone
 from statistics import median
+from time import sleep
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -25,12 +28,20 @@ class PendleProvider(OrderEventProvider):
         timeout_seconds: float = 30.0,
         chain_id: int | None = None,
         order_limit: int = 100,
+        lookback_days: float | None = None,
+        page_size: int = 100,
+        max_pages: int = 25,
+        retry_attempts: int = 3,
     ) -> None:
         self.source_url = source_url
         self.api_base_url = api_base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.chain_id = chain_id
         self.order_limit = order_limit
+        self.lookback_days = lookback_days
+        self.page_size = page_size
+        self.max_pages = max_pages
+        self.retry_attempts = retry_attempts
 
     def list_incentive_configs(self) -> list[dict[str, Any]]:
         payload = self._get("/v1/limit-orders/incentive/configs")
@@ -82,9 +93,7 @@ class PendleProvider(OrderEventProvider):
         )
 
     def load_events(self) -> list[OrderEvent]:
-        active_payload = self.fetch_limit_orders(chain_id=self.chain_id, limit=self.order_limit, is_active=True)
-        inactive_payload = self.fetch_limit_orders(chain_id=self.chain_id, limit=self.order_limit, is_active=False)
-        orders = list(active_payload.get("results", [])) + list(inactive_payload.get("results", []))
+        orders = self.fetch_detection_orders()
         market_references = _build_market_references(orders)
 
         events: list[OrderEvent] = []
@@ -102,6 +111,50 @@ class PendleProvider(OrderEventProvider):
 
         return events
 
+    def fetch_detection_orders(self) -> list[dict[str, Any]]:
+        cutoff = None
+        if self.lookback_days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+
+        orders: list[dict[str, Any]] = []
+        for is_active in (True, False):
+            orders.extend(self._fetch_paginated_limit_orders(is_active=is_active, cutoff=cutoff))
+        return orders
+
+    def _fetch_paginated_limit_orders(
+        self,
+        *,
+        is_active: bool,
+        cutoff: datetime | None,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        skip = 0
+        page_count = 0
+
+        while len(rows) < self.order_limit and page_count < self.max_pages:
+            page_limit = min(self.page_size, self.order_limit - len(rows))
+            payload = self.fetch_limit_orders(
+                chain_id=self.chain_id,
+                limit=page_limit,
+                skip=skip,
+                is_active=is_active,
+            )
+            page = list(payload.get("results", []))
+            if not page:
+                break
+
+            if cutoff is None:
+                rows.extend(page)
+            else:
+                rows.extend(order for order in page if _order_timestamp(order) >= cutoff)
+                if all(_order_timestamp(order) < cutoff for order in page):
+                    break
+
+            skip += len(page)
+            page_count += 1
+
+        return rows[: self.order_limit]
+
     def _get(self, path: str, query: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.api_base_url}/{path.lstrip('/')}"
         if query:
@@ -118,9 +171,25 @@ class PendleProvider(OrderEventProvider):
                 "x-sdk-ui-version": DEFAULT_PENDLE_SDK_UI_VERSION,
             },
         )
-        with urlopen(request, timeout=self.timeout_seconds) as response:
-            body = response.read().decode("utf-8")
-        return json.loads(body)
+        last_error: Exception | None = None
+        for attempt in range(self.retry_attempts):
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    body = response.read().decode("utf-8")
+                return json.loads(body)
+            except HTTPError as error:
+                if error.code not in {408, 429, 500, 502, 503, 504}:
+                    raise
+                last_error = error
+            except (TimeoutError, URLError, ssl.SSLError) as error:
+                last_error = error
+
+            if attempt < self.retry_attempts - 1:
+                sleep(0.7 * (attempt + 1))
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Pendle request failed without an exception.")
 
 
 def _order_to_event(
@@ -221,6 +290,10 @@ def _side(order: dict[str, Any]) -> str:
 def _event_timestamp(order: dict[str, Any], event_type: str) -> datetime:
     if event_type == "open":
         return _parse_timestamp(order.get("createdAt") or order.get("latestEventTimestamp"))
+    return _parse_timestamp(order.get("latestEventTimestamp") or order.get("createdAt"))
+
+
+def _order_timestamp(order: dict[str, Any]) -> datetime:
     return _parse_timestamp(order.get("latestEventTimestamp") or order.get("createdAt"))
 
 
