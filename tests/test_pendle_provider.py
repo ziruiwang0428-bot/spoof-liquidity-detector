@@ -8,8 +8,8 @@ class FakePendleProvider(PendleProvider):
         super().__init__()
         self.calls = []
 
-    def _get(self, path, query=None):
-        self.calls.append((path, query))
+    def _get(self, path, query=None, base_url=None):
+        self.calls.append((path, query, base_url))
         if path == "/v1/limit-orders/incentive/configs":
             return {"configs": [{"chainId": 42161}]}
         if path == "/v1/limit-orders/incentive/user/aggregate":
@@ -87,14 +87,14 @@ class PendleProviderTest(unittest.TestCase):
         configs = provider.list_incentive_configs()
 
         self.assertEqual(configs, [{"chainId": 42161}])
-        self.assertEqual(provider.calls[0], ("/v1/limit-orders/incentive/configs", None))
+        self.assertEqual(provider.calls[0], ("/v1/limit-orders/incentive/configs", None, None))
 
     def test_fetch_limit_orders_builds_query(self):
         provider = FakePendleProvider()
 
         provider.fetch_limit_orders(chain_id=42161, limit=5, is_active=False, maker="0xmaker")
 
-        path, query = provider.calls[0]
+        path, query, _base_url = provider.calls[0]
         self.assertEqual(path, "/v1/limit-orders")
         self.assertEqual(query["chainId"], 42161)
         self.assertEqual(query["limit"], 5)
@@ -119,13 +119,12 @@ class PendleProviderTest(unittest.TestCase):
         self.assertEqual(events[0].price, 0.1)
         self.assertEqual(events[2].side, "sell")
 
-    def test_lookback_filters_old_orders(self):
+    def test_historical_scan_requires_chain_id(self):
         provider = FakePendleProvider()
-        provider.lookback_days = 0.001
+        provider.lookback_days = 30
 
-        events = provider.load_events()
-
-        self.assertEqual(events, [])
+        with self.assertRaises(ValueError):
+            provider.load_events()
 
     def test_fetch_account_economics_uses_reward_history(self):
         provider = FakePendleProvider()
@@ -136,6 +135,40 @@ class PendleProviderTest(unittest.TestCase):
         self.assertEqual(economics["0xmakerA"].subsidy, 7.0)
         self.assertEqual(economics["0xmakerA"].capital, 100.0)
         self.assertEqual(round(economics["0xmakerA"].annualized_return, 2), 3.65)
+
+    def test_historical_scan_uses_core_resume_token_api(self):
+        class HistoricalFakePendleProvider(FakePendleProvider):
+            def _get(self, path, query=None, base_url=None):
+                self.calls.append((path, query, base_url))
+                if path == "/v2/limit-orders":
+                    return {
+                        "results": [
+                            {
+                                "id": "0xcore-live",
+                                "maker": "0xmakerA",
+                                "chainId": 42161,
+                                "yt": "0xmarket",
+                                "lnImpliedRate": "100000000000000000",
+                                "createdAt": "2026-07-24T09:00:00.000Z",
+                                "latestEventTimestamp": "2026-07-24T09:00:00.000Z",
+                                "isActive": True,
+                                "orderState": {"orderType": "LONG_YIELD", "notionalVolumeUSD": "1000"},
+                            }
+                        ]
+                    }
+                if path == "/v2/limit-orders/archived":
+                    return {"results": []}
+                return super()._get(path, query=query, base_url=base_url)
+
+        provider = HistoricalFakePendleProvider()
+        provider.chain_id = 42161
+        provider.lookback_days = 30
+
+        orders = provider.fetch_detection_orders()
+
+        self.assertEqual([order["id"] for order in orders], ["0xcore-live"])
+        self.assertEqual(provider.calls[0][0], "/v2/limit-orders")
+        self.assertEqual(provider.calls[0][2], "https://api-v2.pendle.finance/core")
 
 
 if __name__ == "__main__":

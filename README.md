@@ -15,7 +15,7 @@ Important distinction:
 
 - The Polymarket Gamma and CLOB APIs can list active markets and fetch aggregated order books by CLOB token ID.
 - The Polymarket PMXT URL is a real archive endpoint. The CLI can also list and download archive snapshots from it.
-- The Pendle app uses public backend endpoints under `https://api-v2.pendle.finance/bff`. The CLI can fetch raw incentive configs, raw limit orders, and aggregated order-book entries from those endpoints.
+- The Pendle app uses public backend endpoints under `https://api-v2.pendle.finance/bff`. Historical scans use `https://api-v2.pendle.finance/core/v2/limit-orders` and `/archived` with `resumeToken` pagination.
 - To run the spoof-liquidity detector itself on Pendle or Polymarket account-level behavior, raw venue responses still need to be converted into the normalized open/cancel/fill event schema below.
 
 ## Quick Start
@@ -77,6 +77,8 @@ python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode
 python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --lookback week --fetch-limit 500 --top 10
 python -m spoof_liquidity_detector.cli --provider pendle --chain-id 42161 --mode accounts --lookback month --fetch-limit 1000 --max-pages 50 --top 10
 ```
+
+For deeper history, the Pendle provider uses the core `resumeToken` API rather than shallow `skip` pagination.
 
 List a Pendle market order book:
 

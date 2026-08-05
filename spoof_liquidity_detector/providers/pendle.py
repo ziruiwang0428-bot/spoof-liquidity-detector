@@ -15,6 +15,7 @@ from spoof_liquidity_detector.schema import AccountEconomics, OrderEvent
 
 DEFAULT_PENDLE_LIMIT_ORDER_URL = "https://app.pendle.finance/limit-order"
 DEFAULT_PENDLE_API_BASE_URL = "https://api-v2.pendle.finance/bff"
+DEFAULT_PENDLE_CORE_API_BASE_URL = "https://api-v2.pendle.finance/core"
 DEFAULT_PENDLE_SDK_UI_VERSION = "1.0.0"
 MAX_PENDLE_SKIP = 1000
 
@@ -26,6 +27,7 @@ class PendleProvider(OrderEventProvider):
         self,
         source_url: str = DEFAULT_PENDLE_LIMIT_ORDER_URL,
         api_base_url: str = DEFAULT_PENDLE_API_BASE_URL,
+        core_api_base_url: str = DEFAULT_PENDLE_CORE_API_BASE_URL,
         timeout_seconds: float = 30.0,
         chain_id: int | None = None,
         order_limit: int = 100,
@@ -36,6 +38,7 @@ class PendleProvider(OrderEventProvider):
     ) -> None:
         self.source_url = source_url
         self.api_base_url = api_base_url.rstrip("/")
+        self.core_api_base_url = core_api_base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.chain_id = chain_id
         self.order_limit = order_limit
@@ -139,14 +142,65 @@ class PendleProvider(OrderEventProvider):
         return events
 
     def fetch_detection_orders(self) -> list[dict[str, Any]]:
-        cutoff = None
         if self.lookback_days is not None:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+            return self.fetch_historical_limit_orders()
 
         orders: list[dict[str, Any]] = []
         for is_active in (True, False):
-            orders.extend(self._fetch_paginated_limit_orders(is_active=is_active, cutoff=cutoff))
+            orders.extend(self._fetch_paginated_limit_orders(is_active=is_active, cutoff=None))
         return orders
+
+    def fetch_historical_limit_orders(self) -> list[dict[str, Any]]:
+        if self.chain_id is None:
+            raise ValueError("chain_id is required for Pendle historical scans.")
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=self.lookback_days or 1.0)
+        orders: list[dict[str, Any]] = []
+        for archived in (False, True):
+            orders.extend(
+                self._fetch_core_limit_orders(
+                    archived=archived,
+                    timestamp_start=start,
+                    timestamp_end=end,
+                )
+            )
+        return _dedupe_orders(orders)[: self.order_limit]
+
+    def _fetch_core_limit_orders(
+        self,
+        *,
+        archived: bool,
+        timestamp_start: datetime,
+        timestamp_end: datetime,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        resume_token = None
+        page_count = 0
+        path = "/v2/limit-orders/archived" if archived else "/v2/limit-orders"
+
+        while len(rows) < self.order_limit and page_count < self.max_pages:
+            query: dict[str, Any] = {
+                "chainId": self.chain_id,
+                "limit": min(self.page_size, self.order_limit - len(rows)),
+                "timestamp_start": _format_api_timestamp(timestamp_start),
+                "timestamp_end": _format_api_timestamp(timestamp_end),
+            }
+            if resume_token:
+                query["resumeToken"] = resume_token
+
+            payload = self._get(path, query, base_url=self.core_api_base_url)
+            page = list(payload.get("results", []))
+            if not page:
+                break
+
+            rows.extend(page)
+            resume_token = payload.get("resumeToken")
+            if not resume_token:
+                break
+            page_count += 1
+
+        return rows[: self.order_limit]
 
     def _fetch_paginated_limit_orders(
         self,
@@ -182,8 +236,13 @@ class PendleProvider(OrderEventProvider):
 
         return rows[: self.order_limit]
 
-    def _get(self, path: str, query: dict[str, Any] | None = None) -> dict[str, Any]:
-        url = f"{self.api_base_url}/{path.lstrip('/')}"
+    def _get(
+        self,
+        path: str,
+        query: dict[str, Any] | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
+        url = f"{(base_url or self.api_base_url).rstrip('/')}/{path.lstrip('/')}"
         if query:
             clean_query = {key: value for key, value in query.items() if value is not None}
             url = f"{url}?{urlencode(clean_query)}"
@@ -322,6 +381,22 @@ def _event_timestamp(order: dict[str, Any], event_type: str) -> datetime:
 
 def _order_timestamp(order: dict[str, Any]) -> datetime:
     return _parse_timestamp(order.get("latestEventTimestamp") or order.get("createdAt"))
+
+
+def _format_api_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _dedupe_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for order in sorted(orders, key=_order_timestamp, reverse=True):
+        order_id = str(order.get("id") or "")
+        if not order_id or order_id in seen:
+            continue
+        seen.add(order_id)
+        deduped.append(order)
+    return deduped
 
 
 def _parse_timestamp(value: object) -> datetime:
