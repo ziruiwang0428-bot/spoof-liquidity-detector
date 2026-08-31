@@ -4,7 +4,7 @@ from collections import defaultdict
 from math import exp
 from statistics import mean
 
-from spoof_liquidity_detector.schema import AccountEconomics, AccountRiskProfile, DetectionResult
+from spoof_liquidity_detector.schema import AccountChainEvidence, AccountEconomics, AccountRiskProfile, DetectionResult
 
 
 class AccountProfiler:
@@ -24,14 +24,16 @@ class AccountProfiler:
         self,
         order_results: list[DetectionResult],
         economics: dict[str, AccountEconomics] | None = None,
+        chain_evidence: dict[str, AccountChainEvidence] | None = None,
     ) -> list[AccountRiskProfile]:
         grouped: dict[str, list[DetectionResult]] = defaultdict(list)
         for result in order_results:
             grouped[result.maker].append(result)
 
         economics = economics or {}
+        chain_evidence = chain_evidence or {}
         profiles = [
-            self._profile_one(maker, rows, economics.get(maker))
+            self._profile_one(maker, rows, economics.get(maker), chain_evidence.get(maker))
             for maker, rows in grouped.items()
         ]
         return sorted(profiles, key=lambda item: item.account_risk_score, reverse=True)
@@ -41,6 +43,7 @@ class AccountProfiler:
         maker: str,
         rows: list[DetectionResult],
         economics: AccountEconomics | None,
+        chain_evidence: AccountChainEvidence | None,
     ) -> AccountRiskProfile:
         order_count = len(rows)
         cancelled = [row for row in rows if row.features.cancelled]
@@ -68,6 +71,10 @@ class AccountProfiler:
         cost = economics.cost if economics else 0.0
         net_profit = economics.net_profit if economics else 0.0
         annualized_return = economics.annualized_return if economics else 0.0
+        chain_evidence_order_count = chain_evidence.confirmed_order_count if chain_evidence else 0
+        chain_evidence_matched_log_count = chain_evidence.matched_log_count if chain_evidence else 0
+        chain_evidence_ratio = chain_evidence.evidence_ratio if chain_evidence else 0.0
+        chain_evidence_events = chain_evidence.event_names if chain_evidence else ()
 
         reasons = self._reasons(
             cancel_rate=cancel_rate,
@@ -75,6 +82,9 @@ class AccountProfiler:
             far_order_ratio=far_order_ratio,
             net_profit=net_profit,
             annualized_return=annualized_return,
+            chain_evidence_order_count=chain_evidence_order_count,
+            chain_evidence_matched_log_count=chain_evidence_matched_log_count,
+            chain_evidence_events=chain_evidence_events,
         )
         account_risk_score = self._risk_score(
             near_touch_cancel_rate=near_touch_cancel_rate,
@@ -82,7 +92,19 @@ class AccountProfiler:
             average_order_risk=average_order_risk,
             net_profit=net_profit,
             annualized_return=annualized_return,
+            chain_evidence_ratio=chain_evidence_ratio,
+            chain_evidence_matched_log_count=chain_evidence_matched_log_count,
         )
+        chain_locked = self._chain_locked(
+            account_risk_score=account_risk_score,
+            near_touch_cancel_rate=near_touch_cancel_rate,
+            far_order_ratio=far_order_ratio,
+            net_profit=net_profit,
+            annualized_return=annualized_return,
+            chain_evidence_matched_log_count=chain_evidence_matched_log_count,
+        )
+        if chain_locked and "chain_evidence_locked_account" not in reasons:
+            reasons.append("chain_evidence_locked_account")
 
         return AccountRiskProfile(
             maker=maker,
@@ -103,6 +125,11 @@ class AccountProfiler:
             annualized_return=round(annualized_return, 4),
             account_risk_score=round(account_risk_score, 4),
             reasons=tuple(reasons),
+            chain_evidence_order_count=chain_evidence_order_count,
+            chain_evidence_matched_log_count=chain_evidence_matched_log_count,
+            chain_evidence_ratio=round(chain_evidence_ratio, 4),
+            chain_evidence_events=chain_evidence_events,
+            chain_locked=chain_locked,
         )
 
     def _reasons(
@@ -112,6 +139,9 @@ class AccountProfiler:
         far_order_ratio: float,
         net_profit: float,
         annualized_return: float,
+        chain_evidence_order_count: int,
+        chain_evidence_matched_log_count: int,
+        chain_evidence_events: tuple[str, ...],
     ) -> list[str]:
         reasons: list[str] = []
         if near_touch_cancel_rate >= 0.25:
@@ -124,6 +154,14 @@ class AccountProfiler:
             reasons.append("subsidy_positive_after_cost")
         if annualized_return >= self.suspicious_annualized_return:
             reasons.append("high_subsidy_annualized_return")
+        if chain_evidence_order_count > 0:
+            reasons.append("chain_order_event_confirmed")
+        if chain_evidence_matched_log_count > 0:
+            reasons.append("chain_order_log_matched")
+        if "OrderCanceled" in chain_evidence_events:
+            reasons.append("chain_cancel_event_confirmed")
+        if "OrderFilledV2" in chain_evidence_events:
+            reasons.append("chain_fill_event_confirmed")
         return reasons
 
     @staticmethod
@@ -133,6 +171,8 @@ class AccountProfiler:
         average_order_risk: float,
         net_profit: float,
         annualized_return: float,
+        chain_evidence_ratio: float,
+        chain_evidence_matched_log_count: int,
     ) -> float:
         raw = (
             near_touch_cancel_rate * 2.2
@@ -140,9 +180,29 @@ class AccountProfiler:
             + average_order_risk * 1.4
             + (0.8 if net_profit > 0 else 0.0)
             + min(max(annualized_return, 0.0), 1.0)
+            + min(chain_evidence_ratio, 1.0) * 0.7
+            + (0.5 if chain_evidence_matched_log_count > 0 else 0.0)
             - 2.0
         )
         return 1.0 / (1.0 + exp(-raw))
+
+    @staticmethod
+    def _chain_locked(
+        account_risk_score: float,
+        near_touch_cancel_rate: float,
+        far_order_ratio: float,
+        net_profit: float,
+        annualized_return: float,
+        chain_evidence_matched_log_count: int,
+    ) -> bool:
+        behavior_flagged = near_touch_cancel_rate >= 0.25 or far_order_ratio >= 0.50
+        economics_flagged = net_profit > 0 or annualized_return >= 0.20
+        return (
+            chain_evidence_matched_log_count > 0
+            and account_risk_score >= 0.70
+            and behavior_flagged
+            and economics_flagged
+        )
 
 
 def _ratio(numerator: int, denominator: int) -> float:

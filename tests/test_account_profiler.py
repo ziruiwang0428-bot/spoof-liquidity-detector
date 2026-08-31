@@ -2,8 +2,10 @@ import unittest
 from pathlib import Path
 
 from spoof_liquidity_detector.accounts import load_account_economics
+from spoof_liquidity_detector.accounts.profiler import AccountProfiler
 from spoof_liquidity_detector.pipeline import DetectionPipeline
 from spoof_liquidity_detector.providers import CsvOrderEventProvider
+from spoof_liquidity_detector.schema import AccountChainEvidence
 
 
 class AccountProfilerTest(unittest.TestCase):
@@ -27,6 +29,31 @@ class AccountProfilerTest(unittest.TestCase):
 
         self.assertLess(by_maker["0xRealMM"].account_risk_score, by_maker["0xAlpha"].account_risk_score)
         self.assertLess(by_maker["0xRealMM"].net_profit, 0)
+
+    def test_account_profiles_lock_risky_account_with_order_log_evidence(self):
+        provider = CsvOrderEventProvider(Path("data/sample_order_events.csv"))
+        economics = load_account_economics(Path("data/sample_account_economics.csv"))
+        order_results = DetectionPipeline(provider).run()
+        profiles = AccountProfiler().profile(
+            order_results,
+            economics=economics,
+            chain_evidence={
+                "0xAlpha": AccountChainEvidence(
+                    maker="0xAlpha",
+                    order_count=2,
+                    confirmed_order_count=2,
+                    matched_log_count=2,
+                    blocks=(42, 43),
+                    contracts=("0x2222222222222222222222222222222222222222",),
+                )
+            },
+        )
+        by_maker = {profile.maker: profile for profile in profiles}
+
+        self.assertTrue(by_maker["0xAlpha"].chain_locked)
+        self.assertEqual(by_maker["0xAlpha"].chain_evidence_ratio, 1.0)
+        self.assertIn("chain_order_log_matched", by_maker["0xAlpha"].reasons)
+        self.assertIn("chain_evidence_locked_account", by_maker["0xAlpha"].reasons)
 
 
 if __name__ == "__main__":

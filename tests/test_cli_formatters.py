@@ -2,6 +2,7 @@ import unittest
 
 from spoof_liquidity_detector.cli import (
     _format_archive_table,
+    _format_chain_evidence_table,
     _format_pendle_incentives,
     _format_pendle_order_book,
     _format_pendle_orders,
@@ -9,6 +10,7 @@ from spoof_liquidity_detector.cli import (
     _format_polymarket_order_book,
 )
 from spoof_liquidity_detector.providers import ArchiveSnapshot
+from spoof_liquidity_detector.schema import ChainEventEvidence, ChainEvidence
 
 
 class CliFormatterTest(unittest.TestCase):
@@ -111,6 +113,40 @@ class CliFormatterTest(unittest.TestCase):
         self.assertIn("bid", table)
         self.assertIn("ask", table)
         self.assertIn("4366.52", table)
+
+    def test_formats_chain_evidence(self):
+        table = _format_chain_evidence_table(
+            [
+                ChainEvidence(
+                    venue="pendle",
+                    chain_id=42161,
+                    order_id="0x" + "a" * 64,
+                    maker="0x1111111111111111111111111111111111111111",
+                    transaction_hashes=("0x" + "b" * 64,),
+                    confirmed_transaction_count=1,
+                    matched_log_count=1,
+                    blocks=(42,),
+                    contracts=("0x2222222222222222222222222222222222222222",),
+                    status="confirmed_with_decoded_event",
+                    events=(
+                        ChainEventEvidence(
+                            event_name="OrderFilledV2",
+                            order_hash="0x" + "a" * 64,
+                            maker="0x1111111111111111111111111111111111111111",
+                            contract="0x2222222222222222222222222222222222222222",
+                            block_number=42,
+                            transaction_hash="0x" + "b" * 64,
+                            log_index=7,
+                        ),
+                    ),
+                )
+            ]
+        )
+
+        self.assertIn("confirmed_with_decoded_event", table)
+        self.assertIn("OrderFilledV2", table)
+        self.assertIn("#7", table)
+        self.assertIn("42", table)
 
 
 if __name__ == "__main__":

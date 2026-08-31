@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from spoof_liquidity_detector.accounts import AccountProfiler, load_account_economics
+from spoof_liquidity_detector.evidence import EvmChainEvidenceClient, summarize_account_chain_evidence
 from spoof_liquidity_detector.pipeline import DetectionPipeline
 from spoof_liquidity_detector.providers import (
     ArchiveSnapshot,
@@ -13,6 +14,11 @@ from spoof_liquidity_detector.providers import (
     PolymarketLiveProvider,
     PolymarketProvider,
 )
+from spoof_liquidity_detector.schema import ChainEvidence
+
+DEFAULT_PENDLE_EVIDENCE_CONTRACTS = {
+    42161: ["0x000000000000c9B3E2C3Ec88B1B4c0cD853f4321"],
+}
 
 
 def main() -> None:
@@ -42,6 +48,12 @@ def main() -> None:
     parser.add_argument("--token-id", help="Polymarket CLOB token ID for --order-book.")
     parser.add_argument("--maker", help="Optional Pendle maker address filter for --list-orders.")
     parser.add_argument("--active", choices=["true", "false", "all"], default="true", help="Pendle active-order filter.")
+    parser.add_argument("--confirm-chain-evidence", action="store_true", help="Confirm Pendle order transaction evidence on-chain.")
+    parser.add_argument("--rpc-url", help="Optional EVM JSON-RPC URL for --confirm-chain-evidence.")
+    parser.add_argument("--evidence-contract", action="append", help="Optional contract address to scan with eth_getLogs.")
+    parser.add_argument("--from-block", help="Optional start block for --evidence-contract log scans.")
+    parser.add_argument("--to-block", default="latest", help="Optional end block for --evidence-contract log scans.")
+    parser.add_argument("--log-chunk-size", type=int, default=50_000, help="Block chunk size for EVM log scans.")
     args = parser.parse_args()
 
     if args.provider == "polymarket-archive":
@@ -134,7 +146,11 @@ def _run_pendle(args) -> None:
             is_active=is_active,
             maker=args.maker,
         )
-        print(_format_pendle_orders(payload.get("results", [])))
+        rows = payload.get("results", [])
+        print(_format_pendle_orders(rows))
+        if args.confirm_chain_evidence:
+            print()
+            print(_format_chain_evidence_table(_confirm_chain_evidence(rows, args)))
         return
 
     if args.order_book:
@@ -147,16 +163,67 @@ def _run_pendle(args) -> None:
     pipeline = DetectionPipeline(provider)
     if args.mode == "accounts":
         order_results = pipeline.run()
+        chain_evidence_rows: list[ChainEvidence] = []
+        account_chain_evidence = None
+        if args.confirm_chain_evidence:
+            raw_orders = provider.fetch_detection_orders()
+            scored_ids = {result.order_id for result in order_results}
+            evidence_orders = [order for order in raw_orders if str(order.get("id") or "") in scored_ids]
+            chain_evidence_rows = _confirm_chain_evidence(evidence_orders, args)
+            account_chain_evidence = summarize_account_chain_evidence(chain_evidence_rows)
         if args.economics:
             economics = load_account_economics(args.economics)
         else:
             makers = sorted({result.maker for result in order_results})
             economics = provider.fetch_account_economics(makers)
-        results = AccountProfiler().profile(order_results, economics=economics)
+        results = AccountProfiler().profile(
+            order_results,
+            economics=economics,
+            chain_evidence=account_chain_evidence,
+        )
         print(_format_account_table(results[: args.top]))
+        if args.confirm_chain_evidence:
+            print()
+            top_makers = {result.maker for result in results[: args.top]}
+            print(_format_chain_evidence_table([row for row in chain_evidence_rows if row.maker in top_makers][: args.top]))
     else:
         results = pipeline.run()
         print(_format_order_table(results[: args.top]))
+        if args.confirm_chain_evidence:
+            raw_by_id = {str(order.get("id") or ""): order for order in provider.fetch_detection_orders()}
+            evidence_orders = [raw_by_id[result.order_id] for result in results[: args.top] if result.order_id in raw_by_id]
+            print()
+            print(_format_chain_evidence_table(_confirm_chain_evidence(evidence_orders, args)))
+
+
+def _confirm_chain_evidence(rows: list[dict], args) -> list[ChainEvidence]:
+    if args.chain_id is None:
+        raise SystemExit("--chain-id is required with --confirm-chain-evidence")
+    client = EvmChainEvidenceClient(chain_id=args.chain_id, rpc_url=args.rpc_url)
+    event_contracts = args.evidence_contract or DEFAULT_PENDLE_EVIDENCE_CONTRACTS.get(args.chain_id)
+    if args.from_block is None:
+        event_contracts = None
+    from_block = _parse_block_arg(args.from_block) if args.from_block else None
+    to_block = _parse_block_arg(args.to_block)
+    return [
+        client.confirm_order_payload(
+            row,
+            venue="pendle",
+            event_contracts=event_contracts,
+            from_block=from_block,
+            to_block=to_block,
+            log_chunk_size=args.log_chunk_size,
+        )
+        for row in rows
+    ]
+
+
+def _parse_block_arg(value: str) -> int | str:
+    if value in {"earliest", "latest", "pending", "safe", "finalized"}:
+        return value
+    if value.startswith("0x"):
+        return int(value, 16)
+    return int(value)
 
 
 def _format_archive_table(rows: list[ArchiveSnapshot]) -> str:
@@ -199,15 +266,19 @@ def _format_order_table(rows) -> str:
 
 
 def _format_account_table(rows) -> str:
-    headers = ["risk", "maker", "orders", "avoid", "far_order_ratio", "profit", "apy", "reasons"]
+    headers = ["risk", "locked", "maker", "orders", "avoid", "far_ratio", "chain", "logs", "events", "profit", "apy", "reasons"]
     lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _account_widths()))]
     for row in rows:
         values = [
             f"{row.account_risk_score:.4f}",
+            "LOCKED" if row.chain_locked else "",
             row.maker,
             str(row.order_count),
             f"{row.near_touch_cancel_rate:.2%}",
             f"{row.far_order_ratio:.2%}",
+            f"{row.chain_evidence_ratio:.2%}",
+            str(row.chain_evidence_matched_log_count),
+            ",".join(row.chain_evidence_events),
             f"{row.net_profit:.2f}",
             f"{row.annualized_return:.2%}",
             ",".join(row.reasons),
@@ -269,6 +340,34 @@ def _format_pendle_order_book(payload, top: int) -> str:
         ]
         lines.append("  ".join(value.ljust(width) for value, width in zip(values, _pendle_book_widths())))
     return "\n".join(lines)
+
+
+def _format_chain_evidence_table(rows: list[ChainEvidence]) -> str:
+    headers = ["status", "order_id", "maker", "txs", "logs", "events", "blocks", "proof"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _chain_evidence_widths()))]
+    for row in rows:
+        values = [
+            row.status,
+            _shorten(row.order_id),
+            _shorten(row.maker),
+            str(row.confirmed_transaction_count),
+            str(row.matched_log_count),
+            ",".join(_event_summary(event) for event in row.events),
+            ",".join(str(block) for block in row.blocks),
+            ",".join(_event_proof(event) for event in row.events[:2]) or ",".join(_shorten(contract) for contract in row.contracts[:3]),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _chain_evidence_widths())))
+    return "\n".join(lines)
+
+
+def _event_summary(event) -> str:
+    return event.event_name.split(":")[0]
+
+
+def _event_proof(event) -> str:
+    tx = _shorten(event.transaction_hash, prefix=8, suffix=6) if event.transaction_hash else "no-tx"
+    index = "" if event.log_index is None else f"#{event.log_index}"
+    return f"{_shorten(event.contract)}:{tx}{index}"
 
 
 def _format_polymarket_markets(rows) -> str:
@@ -346,7 +445,7 @@ def _order_widths() -> list[int]:
 
 
 def _account_widths() -> list[int]:
-    return [7, 44, 6, 8, 15, 10, 9, 64]
+    return [7, 8, 44, 6, 8, 9, 8, 5, 20, 10, 9, 80]
 
 
 def _archive_widths() -> list[int]:
@@ -371,6 +470,10 @@ def _polymarket_market_widths() -> list[int]:
 
 def _polymarket_book_widths() -> list[int]:
     return [7, 8, 12, 20, 15]
+
+
+def _chain_evidence_widths() -> list[int]:
+    return [30, 15, 15, 4, 5, 24, 18, 80]
 
 
 if __name__ == "__main__":

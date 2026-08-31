@@ -118,3 +118,70 @@ class AccountRiskProfile:
     annualized_return: float
     account_risk_score: float
     reasons: tuple[str, ...]
+    chain_evidence_order_count: int = 0
+    chain_evidence_matched_log_count: int = 0
+    chain_evidence_ratio: float = 0.0
+    chain_evidence_events: tuple[str, ...] = ()
+    chain_locked: bool = False
+
+
+@dataclass(frozen=True)
+class ChainEventEvidence:
+    event_name: str
+    order_hash: str
+    maker: str
+    contract: str
+    block_number: int | None
+    transaction_hash: str
+    log_index: int | None
+    order_type: int | None = None
+    yt: str = ""
+    token: str = ""
+    taker: str = ""
+    notional_volume: int | None = None
+
+
+@dataclass(frozen=True)
+class ChainEvidence:
+    venue: str
+    chain_id: int
+    order_id: str
+    maker: str
+    transaction_hashes: tuple[str, ...]
+    confirmed_transaction_count: int
+    matched_log_count: int
+    blocks: tuple[int, ...]
+    contracts: tuple[str, ...]
+    status: str
+    events: tuple[ChainEventEvidence, ...] = ()
+
+    @property
+    def confirmed(self) -> bool:
+        return self.confirmed_transaction_count > 0 or self.matched_log_count > 0
+
+    @property
+    def order_linked(self) -> bool:
+        return self.matched_log_count > 0
+
+
+@dataclass(frozen=True)
+class AccountChainEvidence:
+    maker: str
+    order_count: int
+    confirmed_order_count: int
+    matched_log_count: int
+    blocks: tuple[int, ...]
+    contracts: tuple[str, ...]
+    event_counts: dict[str, int] | None = None
+
+    @property
+    def evidence_ratio(self) -> float:
+        if self.order_count == 0:
+            return 0.0
+        return self.confirmed_order_count / self.order_count
+
+    @property
+    def event_names(self) -> tuple[str, ...]:
+        if not self.event_counts:
+            return ()
+        return tuple(sorted(name for name, count in self.event_counts.items() if count > 0))
