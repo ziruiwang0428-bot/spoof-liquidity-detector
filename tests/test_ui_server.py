@@ -2,11 +2,18 @@ import unittest
 
 from unittest.mock import patch
 
-from spoof_liquidity_detector.ui_server import pendle_account_profiles, sample_account_profiles
+from spoof_liquidity_detector.ui_server import _observation_days, pendle_account_profiles, sample_account_profiles
 from test_pendle_provider import FakePendleProvider
 
 
 class UiServerTest(unittest.TestCase):
+    def test_calculates_observation_days_from_chain_timestamps(self):
+        class FakeClient:
+            def block_timestamp(self, block):
+                return {100: 1_000, 200: 87_400}[block]
+
+        self.assertEqual(_observation_days(FakeClient(), 100, 200), 1.0)
+
     def test_loads_sample_account_profiles_for_dashboard(self):
         rows = sample_account_profiles(top=3)
 

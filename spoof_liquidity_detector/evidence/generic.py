@@ -38,6 +38,7 @@ def scan_generic_evm_chain_fills(
     to_block: int | str = "latest",
     chunk_size: int | None = 10_000,
     rewards: dict[str, float] | None = None,
+    observation_days: float | None = None,
 ) -> list[ChainFillSummary]:
     logs = client.get_logs(
         addresses=contracts,
@@ -52,6 +53,7 @@ def scan_generic_evm_chain_fills(
         chain_id=client.chain_id,
         amount_decimals=config.amount_decimals,
         rewards=rewards,
+        observation_days=observation_days,
     )
 
 

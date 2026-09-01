@@ -1,6 +1,10 @@
 import unittest
 
-from spoof_liquidity_detector.evidence.rewards import ERC20_TRANSFER_TOPIC, scan_erc20_reward_transfers
+from spoof_liquidity_detector.evidence.rewards import (
+    DEFAULT_POLYMARKET_REWARD_DISTRIBUTORS,
+    ERC20_TRANSFER_TOPIC,
+    scan_erc20_reward_transfers,
+)
 
 
 class FakeRewardClient:
@@ -22,6 +26,9 @@ class FakeRewardClient:
 
 
 class ChainRewardsTest(unittest.TestCase):
+    def test_defaults_include_current_liquidity_reward_distributor(self):
+        self.assertIn("0x2c2795EA295d5Eb51F9121B728eD2eA4e936a709", DEFAULT_POLYMARKET_REWARD_DISTRIBUTORS)
+
     def test_aggregates_reward_transfers_by_recipient(self):
         client = FakeRewardClient()
         rows = scan_erc20_reward_transfers(

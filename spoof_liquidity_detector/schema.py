@@ -203,6 +203,9 @@ class ChainFillSummary:
     fee_paid: float
     reward: float = 0.0
     reward_to_fill_ratio: float = 0.0
+    annualized_reward_to_fill_ratio: float = 0.0
+    observation_days: float = 0.0
+    reward_status: str = "not_configured"
     blocks: tuple[int, ...] = ()
     contracts: tuple[str, ...] = ()
     transaction_hashes: tuple[str, ...] = ()

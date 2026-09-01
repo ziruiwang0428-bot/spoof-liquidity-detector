@@ -35,6 +35,7 @@ class ChainFillSummaryTest(unittest.TestCase):
             chain_id=1,
             amount_decimals=6,
             rewards={"0x1111111111111111111111111111111111111111": 0.3},
+            observation_days=30,
         )
 
         self.assertEqual(len(rows), 1)
@@ -43,6 +44,9 @@ class ChainFillSummaryTest(unittest.TestCase):
         self.assertEqual(rows[0].filled_notional, 3.0)
         self.assertEqual(rows[0].fee_paid, 0.03)
         self.assertAlmostEqual(rows[0].reward_to_fill_ratio, 0.1)
+        self.assertAlmostEqual(rows[0].annualized_reward_to_fill_ratio, 1.2175)
+        self.assertEqual(rows[0].observation_days, 30)
+        self.assertEqual(rows[0].reward_status, "verified")
         self.assertEqual(rows[0].blocks, (100, 101))
         self.assertEqual(rows[0].risk_level, "high")
         self.assertGreaterEqual(rows[0].risk_score, 0.7)
@@ -61,6 +65,26 @@ class ChainFillSummaryTest(unittest.TestCase):
         self.assertEqual(rows[0].risk_level, "high")
         self.assertEqual(rows[0].reward_to_fill_ratio, float("inf"))
         self.assertIn("reward_without_chain_fills", rows[0].reasons)
+
+    def test_distinguishes_missing_reward_source_from_empty_window(self):
+        event = ChainEventEvidence(
+            event_name="OrderFilled",
+            order_hash="0x" + "a" * 64,
+            maker="0x1111111111111111111111111111111111111111",
+            contract="0x2222222222222222222222222222222222222222",
+            block_number=100,
+            transaction_hash="0x" + "b" * 64,
+            log_index=0,
+            notional_volume=1_000_000,
+        )
+
+        missing = summarize_chain_fills([event], venue="demo", chain_id=1)
+        observed_empty = summarize_chain_fills([event], venue="demo", chain_id=1, rewards={})
+
+        self.assertEqual(missing[0].reward_status, "not_configured")
+        self.assertEqual(missing[0].risk_level, "unscored")
+        self.assertEqual(observed_empty[0].reward_status, "not_observed_in_window")
+        self.assertEqual(observed_empty[0].risk_level, "low")
 
 
 if __name__ == "__main__":

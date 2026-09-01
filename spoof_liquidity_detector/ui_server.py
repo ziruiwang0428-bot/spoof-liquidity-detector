@@ -134,6 +134,7 @@ def polymarket_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]]
         raise ValueError(f"No Polymarket contracts configured for chain_id={chain_id}.")
 
     client = EvmChainEvidenceClient(chain_id=chain_id, rpc_url=rpc_url)
+    observation_days = _observation_days(client, from_block, to_block)
     rewards = _load_reward_amounts_from_params(params)
     if rewards is None and _bool_param(params, "scan_chain_rewards", True):
         rewards = scan_erc20_reward_transfers(
@@ -151,6 +152,7 @@ def polymarket_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]]
         to_block=to_block,
         chunk_size=chunk_size,
         rewards=rewards,
+        observation_days=observation_days,
     )
     return [_serialize_dataclass(row) for row in rows[:top]]
 
@@ -178,6 +180,7 @@ def generic_evm_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]
         amount_decimals=_int_param(params, "amount_decimals", 6),
     )
     client = EvmChainEvidenceClient(chain_id=chain_id, rpc_url=rpc_url)
+    observation_days = _observation_days(client, from_block, to_block)
     rewards = _load_reward_amounts_from_params(params)
     reward_tokens = params.get("reward_token") or []
     reward_distributors = params.get("reward_distributor") or []
@@ -204,6 +207,7 @@ def generic_evm_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]
         to_block=to_block,
         chunk_size=chunk_size,
         rewards=rewards,
+        observation_days=observation_days,
     )
     return [_serialize_dataclass(row) for row in rows[:top]]
 
@@ -319,6 +323,19 @@ def _block_param(value: str) -> int | str:
     if value.startswith("0x"):
         return int(value, 16)
     return int(value)
+
+
+def _observation_days(
+    client: EvmChainEvidenceClient,
+    from_block: int,
+    to_block: int | str,
+) -> float:
+    resolved_to_block = client.block_number() if isinstance(to_block, str) else to_block
+    if resolved_to_block < from_block:
+        raise ValueError("to_block must be greater than or equal to from_block")
+    start_timestamp = client.block_timestamp(from_block)
+    end_timestamp = client.block_timestamp(resolved_to_block)
+    return max(end_timestamp - start_timestamp, 0) / 86_400
 
 
 def main() -> None:

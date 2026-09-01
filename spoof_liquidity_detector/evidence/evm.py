@@ -8,7 +8,7 @@ from spoof_liquidity_detector.schema import ChainEventEvidence, ChainEvidence
 
 DEFAULT_RPC_URLS = {
     1: "https://ethereum-rpc.publicnode.com",
-    137: "https://polygon-bor-rpc.publicnode.com",
+    137: "https://polygon.publicnode.com",
     42161: "https://arb1.arbitrum.io/rpc",
 }
 
@@ -146,6 +146,13 @@ class EvmChainEvidenceClient:
 
     def block_number(self) -> int:
         return _hex_to_int(self._rpc("eth_blockNumber", []))
+
+    def block_timestamp(self, block_number: int | str) -> int:
+        block = self._rpc("eth_getBlockByNumber", [_block_param(block_number), False]) or {}
+        timestamp = block.get("timestamp")
+        if timestamp is None:
+            raise RuntimeError(f"RPC returned no timestamp for block {block_number}")
+        return _hex_to_int(timestamp)
 
     def _get_logs_once(
         self,

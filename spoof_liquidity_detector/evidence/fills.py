@@ -15,6 +15,7 @@ def summarize_chain_fills(
     amount_decimals: int = 6,
     rewards: dict[str, float] | None = None,
     suspicious_reward_to_fill_ratio: float = 0.05,
+    observation_days: float | None = None,
 ) -> list[ChainFillSummary]:
     reward_source_present = rewards is not None
     rewards = {_normalize_address(maker): reward for maker, reward in (rewards or {}).items()}
@@ -30,6 +31,7 @@ def summarize_chain_fills(
         fee_paid = sum((event.fee_paid or 0) / 10**amount_decimals for event in maker_events)
         reward = rewards.get(maker, 0.0)
         ratio = reward_to_fill_ratio(reward, filled_notional, len(maker_events))
+        annualized_ratio = annualize_reward_to_fill_ratio(ratio, observation_days)
         risk_score, risk_level, reasons = reward_fill_risk(
             reward,
             filled_notional,
@@ -47,6 +49,9 @@ def summarize_chain_fills(
                 fee_paid=fee_paid,
                 reward=reward,
                 reward_to_fill_ratio=ratio,
+                annualized_reward_to_fill_ratio=annualized_ratio,
+                observation_days=round(observation_days or 0.0, 6),
+                reward_status=_reward_status(reward, reward_source_present),
                 blocks=tuple(sorted({event.block_number for event in maker_events if event.block_number is not None})),
                 contracts=tuple(sorted({event.contract for event in maker_events if event.contract})),
                 transaction_hashes=tuple(dict.fromkeys(event.transaction_hash for event in maker_events if event.transaction_hash)),
@@ -67,6 +72,15 @@ def reward_to_fill_ratio(reward: float, filled_notional: float, fill_count: int)
     if fill_count > 0:
         return reward / fill_count
     return math.inf
+
+
+def annualize_reward_to_fill_ratio(ratio: float, observation_days: float | None) -> float:
+    """Annualize reward/fill as a simple-rate proxy, not capital APY."""
+    if ratio <= 0 or not observation_days or observation_days <= 0:
+        return 0.0
+    if ratio == math.inf:
+        return math.inf
+    return ratio * 365.25 / observation_days
 
 
 def reward_fill_risk(
@@ -113,3 +127,9 @@ def _sort_ratio(value: float) -> float:
 
 def _normalize_address(value: str) -> str:
     return str(value).lower()
+
+
+def _reward_status(reward: float, reward_source_present: bool) -> str:
+    if not reward_source_present:
+        return "not_configured"
+    return "verified" if reward > 0 else "not_observed_in_window"

@@ -33,9 +33,12 @@ def scan_polymarket_chain_fills(
     to_block: int | str = "latest",
     chunk_size: int | None = 10_000,
     rewards: dict[str, float] | None = None,
+    observation_days: float | None = None,
 ) -> list[ChainFillSummary]:
     """Scan Polymarket exchange logs and aggregate decoded fill contribution by maker."""
-    rewards = {_normalize_address(maker): reward for maker, reward in (rewards or {}).items()}
+    normalized_rewards = None if rewards is None else {
+        _normalize_address(maker): reward for maker, reward in rewards.items()
+    }
     logs = client.get_logs(
         addresses=contracts,
         from_block=from_block,
@@ -46,7 +49,8 @@ def scan_polymarket_chain_fills(
     return summarize_polymarket_chain_fills(
         (event for log in logs if (event := decode_polymarket_fill_event(log))),
         chain_id=client.chain_id,
-        rewards=rewards,
+        rewards=normalized_rewards,
+        observation_days=observation_days,
     )
 
 
@@ -55,6 +59,7 @@ def summarize_polymarket_chain_fills(
     *,
     chain_id: int,
     rewards: dict[str, float] | None = None,
+    observation_days: float | None = None,
 ) -> list[ChainFillSummary]:
     return summarize_chain_fills(
         events,
@@ -62,6 +67,7 @@ def summarize_polymarket_chain_fills(
         chain_id=chain_id,
         amount_decimals=POLYMARKET_USDC_DECIMALS,
         rewards=rewards,
+        observation_days=observation_days,
     )
 
 

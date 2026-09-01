@@ -58,6 +58,19 @@ class FakeEvmChainEvidenceClient(EvmChainEvidenceClient):
 
 
 class EvmChainEvidenceClientTest(unittest.TestCase):
+    def test_reads_block_timestamp_from_rpc(self):
+        client = EvmChainEvidenceClient(chain_id=137, rpc_url="http://rpc.example")
+        calls = []
+
+        def fake_rpc(method, params):
+            calls.append((method, params))
+            return {"timestamp": "0x64"}
+
+        client._rpc = fake_rpc
+
+        self.assertEqual(client.block_timestamp(42), 100)
+        self.assertEqual(calls, [("eth_getBlockByNumber", ["0x2a", False])])
+
     def test_confirms_receipt_and_matching_log(self):
         client = FakeEvmChainEvidenceClient()
 

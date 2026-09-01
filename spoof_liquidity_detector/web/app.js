@@ -34,6 +34,8 @@ const els = {
   status: document.querySelector("#status"),
   rowCount: document.querySelector("#rowCount"),
   maxRisk: document.querySelector("#maxRisk"),
+  maxReward: document.querySelector("#maxReward"),
+  maxAnnualized: document.querySelector("#maxAnnualized"),
   maxFilled: document.querySelector("#maxFilled"),
   activeMode: document.querySelector("#activeMode"),
   marketScope: document.querySelector("#marketScope"),
@@ -64,7 +66,10 @@ const fillColumns = [
   ["filled_notional", "Filled", formatNumber],
   ["fee_paid", "Fees", formatNumber],
   ["reward", "Reward", formatNumber],
+  ["reward_status", "Reward Status", formatRewardStatus],
   ["reward_to_fill_ratio", "Reward/Fill", formatRatio],
+  ["annualized_reward_to_fill_ratio", "Annual R/F Proxy", formatPercent],
+  ["observation_days", "Window", formatDays],
   ["evidence_mode", "Evidence", formatEvidence],
   ["reasons", "Reasons", formatList],
   ["transaction_hashes", "Proof", formatProofs],
@@ -186,8 +191,17 @@ function renderSummary() {
   els.rowCount.textContent = String(state.rows.length);
   els.activeMode.textContent = modeLabel();
   const maxRisk = Math.max(0, ...state.rows.map((row) => Number(row.account_risk_score ?? row.risk_score ?? 0)));
+  const maxReward = Math.max(0, ...state.rows.map((row) => Number(row.reward || 0)));
+  const annualizedValues = state.rows
+    .map((row) => row.annualized_reward_to_fill_ratio)
+    .filter((value) => value !== "inf")
+    .map((value) => Number(value || 0));
+  const hasInfiniteAnnualized = state.rows.some((row) => row.annualized_reward_to_fill_ratio === "inf");
+  const maxAnnualized = Math.max(0, ...annualizedValues);
   const maxFilled = Math.max(0, ...state.rows.map((row) => Number(row.filled_notional || row.chain_filled_notional || 0)));
   els.maxRisk.textContent = maxRisk ? maxRisk.toFixed(3) : "-";
+  els.maxReward.textContent = maxReward ? formatNumber(maxReward) : "-";
+  els.maxAnnualized.textContent = hasInfiniteAnnualized ? "inf" : maxAnnualized ? formatPercent(maxAnnualized) : "-";
   els.maxFilled.textContent = maxFilled ? formatNumber(maxFilled) : "-";
 }
 
@@ -264,6 +278,7 @@ function formatNumber(value) {
 }
 
 function formatPercent(value) {
+  if (value === "inf") return "inf";
   return `${(Number(value || 0) * 100).toFixed(2)}%`;
 }
 
@@ -278,6 +293,21 @@ function formatEvidence(value) {
 
 function formatLocked(value) {
   return value ? "Yes" : "No";
+}
+
+function formatRewardStatus(value) {
+  const labels = {
+    verified: "Verified",
+    not_observed_in_window: "None in window",
+    not_configured: "Not configured",
+  };
+  return labels[value] || String(value || "");
+}
+
+function formatDays(value) {
+  const days = Number(value || 0);
+  if (days >= 1) return `${formatNumber(days)} d`;
+  return `${formatNumber(days * 24)} h`;
 }
 
 function formatList(value) {
