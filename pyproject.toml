@@ -13,6 +13,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 spoof-detector = "spoof_liquidity_detector.cli:main"
+spoof-detector-ui = "spoof_liquidity_detector.ui_server:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

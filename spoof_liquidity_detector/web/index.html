@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spoof Liquidity Detector</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Blue-team market integrity</p>
+          <h1>Spoof Liquidity Detector</h1>
+        </div>
+
+        <div class="control-group">
+          <label for="mode">View</label>
+          <select id="mode">
+            <option value="sample">Sample account risk</option>
+            <option value="polymarket">Polymarket chain fills</option>
+          </select>
+        </div>
+
+        <div class="control-grid">
+          <label>
+            Chain
+            <input id="chainId" inputmode="numeric" value="137" />
+          </label>
+          <label>
+            Top
+            <input id="top" inputmode="numeric" value="10" />
+          </label>
+          <label>
+            From block
+            <input id="fromBlock" inputmode="numeric" value="93033091" />
+          </label>
+          <label>
+            To block
+            <input id="toBlock" value="93033191" />
+          </label>
+          <label>
+            Chunk
+            <input id="chunkSize" inputmode="numeric" value="100" />
+          </label>
+          <label>
+            RPC URL
+            <input id="rpcUrl" placeholder="default" />
+          </label>
+        </div>
+
+        <button id="runButton" type="button">Run Scan</button>
+        <p id="status" class="status">Ready</p>
+      </aside>
+
+      <section class="workspace">
+        <div class="summary-strip" aria-live="polite">
+          <div>
+            <span class="summary-label">Rows</span>
+            <strong id="rowCount">0</strong>
+          </div>
+          <div>
+            <span class="summary-label">Max Risk</span>
+            <strong id="maxRisk">-</strong>
+          </div>
+          <div>
+            <span class="summary-label">Max Filled</span>
+            <strong id="maxFilled">-</strong>
+          </div>
+          <div>
+            <span class="summary-label">Mode</span>
+            <strong id="activeMode">Sample</strong>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
