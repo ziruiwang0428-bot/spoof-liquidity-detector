@@ -12,6 +12,11 @@ const els = {
   chunkSize: document.querySelector("#chunkSize"),
   rpcUrl: document.querySelector("#rpcUrl"),
   economicsPath: document.querySelector("#economicsPath"),
+  scanChainRewards: document.querySelector("#scanChainRewards"),
+  lookbackDays: document.querySelector("#lookbackDays"),
+  fetchLimit: document.querySelector("#fetchLimit"),
+  maxPages: document.querySelector("#maxPages"),
+  confirmChain: document.querySelector("#confirmChain"),
   venue: document.querySelector("#venue"),
   contract: document.querySelector("#contract"),
   fillTopic: document.querySelector("#fillTopic"),
@@ -22,12 +27,17 @@ const els = {
   takerAmountWord: document.querySelector("#takerAmountWord"),
   feeWord: document.querySelector("#feeWord"),
   amountDecimals: document.querySelector("#amountDecimals"),
+  rewardToken: document.querySelector("#rewardToken"),
+  rewardDistributor: document.querySelector("#rewardDistributor"),
+  rewardDecimals: document.querySelector("#rewardDecimals"),
   runButton: document.querySelector("#runButton"),
   status: document.querySelector("#status"),
   rowCount: document.querySelector("#rowCount"),
   maxRisk: document.querySelector("#maxRisk"),
   maxFilled: document.querySelector("#maxFilled"),
   activeMode: document.querySelector("#activeMode"),
+  marketScope: document.querySelector("#marketScope"),
+  evidenceScope: document.querySelector("#evidenceScope"),
   tableHead: document.querySelector("#tableHead"),
   tableBody: document.querySelector("#tableBody"),
 };
@@ -35,32 +45,39 @@ const els = {
 const accountColumns = [
   ["maker", "Maker"],
   ["account_risk_score", "Risk", formatRisk],
+  ["evidence_mode", "Evidence", formatEvidence],
   ["order_count", "Orders"],
   ["near_touch_cancel_rate", "Avoid", formatPercent],
   ["far_order_ratio", "Far Ratio", formatPercent],
   ["net_profit", "Profit", formatNumber],
   ["annualized_return", "APY", formatPercent],
   ["reward_to_chain_fill_ratio", "Reward/Fill", formatRatio],
+  ["chain_locked", "Locked", formatLocked],
   ["reasons", "Reasons", formatList],
 ];
 
 const fillColumns = [
   ["maker", "Maker"],
+  ["risk_score", "Risk", formatRisk],
+  ["risk_level", "Level"],
   ["fill_count", "Fills"],
   ["filled_notional", "Filled", formatNumber],
   ["fee_paid", "Fees", formatNumber],
   ["reward", "Reward", formatNumber],
   ["reward_to_fill_ratio", "Reward/Fill", formatRatio],
-  ["blocks", "Blocks", formatBlocks],
+  ["evidence_mode", "Evidence", formatEvidence],
+  ["reasons", "Reasons", formatList],
   ["transaction_hashes", "Proof", formatProofs],
 ];
 
 els.runButton.addEventListener("click", run);
 els.mode.addEventListener("change", () => {
   state.mode = els.mode.value;
+  applyModeDefaults();
   updateModeControls();
   run();
 });
+els.confirmChain.addEventListener("change", updateModeControls);
 
 updateModeControls();
 run();
@@ -88,6 +105,13 @@ function buildUrl() {
     return `/api/sample/accounts?top=${top}`;
   }
   const params = buildChainParams();
+  if (state.mode === "pendle") {
+    params.set("lookback_days", els.lookbackDays.value || "7");
+    params.set("fetch_limit", els.fetchLimit.value || "100");
+    params.set("max_pages", els.maxPages.value || "25");
+    params.set("confirm_chain", els.confirmChain.checked ? "true" : "false");
+    return `/api/pendle/accounts?${params.toString()}`;
+  }
   if (state.mode === "generic") {
     params.set("venue", els.venue.value || "custom-evm");
     params.set("contract", els.contract.value.trim());
@@ -99,6 +123,13 @@ function buildUrl() {
     params.set("taker_amount_word", els.takerAmountWord.value || "3");
     params.set("fee_word", els.feeWord.value || "4");
     params.set("amount_decimals", els.amountDecimals.value || "6");
+    if (els.rewardToken.value.trim()) {
+      params.set("reward_token", els.rewardToken.value.trim());
+    }
+    if (els.rewardDistributor.value.trim()) {
+      params.set("reward_distributor", els.rewardDistributor.value.trim());
+    }
+    params.set("reward_decimals", els.rewardDecimals.value || "6");
     return `/api/evm/fills?${params.toString()}`;
   }
   return `/api/polymarket/fills?${params.toString()}`;
@@ -118,6 +149,7 @@ function buildChainParams() {
   if (els.economicsPath.value.trim()) {
     params.set("economics_path", els.economicsPath.value.trim());
   }
+  params.set("scan_chain_rewards", els.scanChainRewards.checked ? "true" : "false");
   return params;
 }
 
@@ -131,7 +163,7 @@ async function fetchJson(url) {
 }
 
 function render() {
-  const columns = state.mode === "sample" ? accountColumns : fillColumns;
+  const columns = ["sample", "pendle"].includes(state.mode) ? accountColumns : fillColumns;
   els.tableHead.innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>`;
   if (state.rows.length === 0) {
     els.tableBody.innerHTML = `<tr><td class="empty" colspan="${columns.length}">No rows</td></tr>`;
@@ -153,7 +185,7 @@ function renderRow(row, columns) {
 function renderSummary() {
   els.rowCount.textContent = String(state.rows.length);
   els.activeMode.textContent = modeLabel();
-  const maxRisk = Math.max(0, ...state.rows.map((row) => Number(row.account_risk_score || 0)));
+  const maxRisk = Math.max(0, ...state.rows.map((row) => Number(row.account_risk_score ?? row.risk_score ?? 0)));
   const maxFilled = Math.max(0, ...state.rows.map((row) => Number(row.filled_notional || row.chain_filled_notional || 0)));
   els.maxRisk.textContent = maxRisk ? maxRisk.toFixed(3) : "-";
   els.maxFilled.textContent = maxFilled ? formatNumber(maxFilled) : "-";
@@ -165,16 +197,53 @@ function updateModeControls() {
     input.disabled = els.mode.value === "sample";
   });
   els.economicsPath.disabled = els.mode.value === "sample";
+  document.querySelector(".pendle-controls").classList.toggle("is-hidden", els.mode.value !== "pendle");
+  document.querySelectorAll(".pendle-controls input").forEach((input) => {
+    input.disabled = els.mode.value !== "pendle";
+  });
+  els.economicsPath.disabled = !["polymarket", "generic"].includes(els.mode.value);
+  els.scanChainRewards.disabled = !["polymarket", "generic"].includes(els.mode.value);
   document.querySelector(".generic-controls").classList.toggle("is-hidden", els.mode.value !== "generic");
   document.querySelectorAll(".generic-controls input, .generic-controls select").forEach((input) => {
     input.disabled = els.mode.value !== "generic";
   });
+  const scope = modeScope();
+  els.marketScope.textContent = scope.market;
+  els.evidenceScope.textContent = scope.evidence;
+}
+
+function applyModeDefaults() {
+  if (els.mode.value === "pendle") {
+    els.chainId.value = "42161";
+    els.fromBlock.value = "";
+    els.toBlock.value = "latest";
+    els.chunkSize.value = "1000";
+  } else if (els.mode.value === "polymarket") {
+    els.chainId.value = "137";
+    els.fromBlock.value = "93033091";
+    els.toBlock.value = "93033191";
+    els.chunkSize.value = "100";
+  }
 }
 
 function modeLabel() {
   if (state.mode === "sample") return "Sample";
+  if (state.mode === "pendle") return "Pendle";
   if (state.mode === "generic") return "Generic EVM";
   return "Polymarket";
+}
+
+function modeScope() {
+  if (els.mode.value === "pendle") {
+    return { market: "Pendle", evidence: els.confirmChain.checked ? "Chain + API" : "API behavior + rewards" };
+  }
+  if (els.mode.value === "polymarket") {
+    return { market: "Polymarket", evidence: "On-chain fills + reward evidence" };
+  }
+  if (els.mode.value === "generic") {
+    return { market: "Any EVM market", evidence: "Configured on-chain fills + reward evidence" };
+  }
+  return { market: "Sample", evidence: "Demonstration data" };
 }
 
 function setBusy(value) {
@@ -201,6 +270,14 @@ function formatPercent(value) {
 function formatRatio(value) {
   if (value === "inf") return "inf";
   return formatNumber(value);
+}
+
+function formatEvidence(value) {
+  return String(value || "").replaceAll("_", " ");
+}
+
+function formatLocked(value) {
+  return value ? "Yes" : "No";
 }
 
 function formatList(value) {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Spoof Liquidity Detector</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=3" />
   </head>
   <body>
     <main class="app-shell">
@@ -18,9 +18,16 @@
           <label for="mode">View</label>
           <select id="mode">
             <option value="sample">Sample account risk</option>
-            <option value="polymarket">Polymarket chain fills</option>
-            <option value="generic">Generic EVM market</option>
+            <option value="pendle">Pendle full audit</option>
+            <option value="polymarket">Polymarket reward/fill audit</option>
+            <option value="generic">Any EVM reward/fill audit</option>
           </select>
+        </div>
+
+        <div class="market-scope" aria-label="Connected markets">
+          <span>Connected</span>
+          <strong id="marketScope">Sample</strong>
+          <p id="evidenceScope">Demonstration data</p>
         </div>
 
         <div class="control-grid chain-controls">
@@ -51,6 +58,29 @@
           <label>
             Reward CSV
             <input id="economicsPath" placeholder="optional path" />
+          </label>
+          <label class="check-control reward-scan-control">
+            <input id="scanChainRewards" type="checkbox" checked />
+            Scan rewards
+          </label>
+        </div>
+
+        <div class="control-grid pendle-controls is-hidden">
+          <label>
+            Lookback days
+            <input id="lookbackDays" inputmode="decimal" value="7" />
+          </label>
+          <label>
+            Fetch orders
+            <input id="fetchLimit" inputmode="numeric" value="100" />
+          </label>
+          <label>
+            Max pages
+            <input id="maxPages" inputmode="numeric" value="25" />
+          </label>
+          <label class="check-control">
+            <input id="confirmChain" type="checkbox" />
+            Confirm on chain
           </label>
         </div>
 
@@ -98,6 +128,18 @@
           <label>
             Decimals
             <input id="amountDecimals" inputmode="numeric" value="6" />
+          </label>
+          <label>
+            Reward token
+            <input id="rewardToken" placeholder="ERC-20 0x..." />
+          </label>
+          <label>
+            Reward distributor
+            <input id="rewardDistributor" placeholder="sender 0x..." />
+          </label>
+          <label>
+            Reward decimals
+            <input id="rewardDecimals" inputmode="numeric" value="6" />
           </label>
         </div>
 
@@ -151,6 +193,6 @@
         </div>
       </section>
     </main>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=3"></script>
   </body>
 </html>

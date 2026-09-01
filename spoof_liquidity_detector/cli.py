@@ -7,9 +7,12 @@ from pathlib import Path
 from spoof_liquidity_detector.accounts import AccountProfiler, load_account_economics
 from spoof_liquidity_detector.evidence import (
     DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS,
+    DEFAULT_POLYMARKET_REWARD_DISTRIBUTORS,
+    DEFAULT_POLYMARKET_REWARD_TOKENS,
     EvmChainEvidenceClient,
     GenericFillEventConfig,
     scan_generic_evm_chain_fills,
+    scan_erc20_reward_transfers,
     scan_polymarket_chain_fills,
     summarize_account_chain_evidence,
 )
@@ -66,6 +69,10 @@ def main() -> None:
     parser.add_argument("--fee-word", type=int, default=4, help="Data word position containing fee amount; use -1 if unavailable.")
     parser.add_argument("--notional-source", choices=["maker", "taker", "max"], default="max", help="Which decoded amount to treat as filled notional.")
     parser.add_argument("--amount-decimals", type=int, default=6, help="Token decimals for filled notional and fee display.")
+    parser.add_argument("--scan-chain-rewards", action="store_true", help="Scan ERC-20 reward payouts in the same block window.")
+    parser.add_argument("--reward-token", action="append", help="ERC-20 reward token contract; repeat for multiple tokens.")
+    parser.add_argument("--reward-distributor", action="append", help="Reward distributor address; repeat for multiple senders.")
+    parser.add_argument("--reward-decimals", type=int, default=6, help="Reward token display decimals.")
     parser.add_argument("--rpc-url", help="Optional EVM JSON-RPC URL for --confirm-chain-evidence.")
     parser.add_argument("--evidence-contract", action="append", help="Optional contract address to scan with eth_getLogs.")
     parser.add_argument("--from-block", help="Optional start block for --evidence-contract log scans.")
@@ -136,12 +143,24 @@ def _run_polymarket_live(args) -> None:
         contracts = args.evidence_contract or DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS.get(chain_id)
         if not contracts:
             raise SystemExit(f"No default Polymarket exchange contracts for chain_id={chain_id}. Pass --evidence-contract.")
+        from_block = _parse_block_arg(args.from_block)
+        to_block = _parse_block_arg(args.to_block)
         rewards = _load_reward_amounts(args.economics) if args.economics else None
+        if rewards is None and args.scan_chain_rewards:
+            rewards = scan_erc20_reward_transfers(
+                client,
+                token_contracts=args.reward_token or DEFAULT_POLYMARKET_REWARD_TOKENS,
+                distributor_addresses=args.reward_distributor or DEFAULT_POLYMARKET_REWARD_DISTRIBUTORS,
+                from_block=from_block,
+                to_block=to_block,
+                chunk_size=args.log_chunk_size,
+                amount_decimals=args.reward_decimals,
+            )
         rows = scan_polymarket_chain_fills(
             client,
             contracts=contracts,
-            from_block=_parse_block_arg(args.from_block),
-            to_block=_parse_block_arg(args.to_block),
+            from_block=from_block,
+            to_block=to_block,
             chunk_size=args.log_chunk_size,
             rewards=rewards,
         )
@@ -193,6 +212,18 @@ def _run_generic_evm(args) -> None:
     )
     client = EvmChainEvidenceClient(chain_id=args.chain_id, rpc_url=args.rpc_url)
     rewards = _load_reward_amounts(args.economics) if args.economics else None
+    if rewards is None and args.scan_chain_rewards:
+        if not args.reward_token or not args.reward_distributor:
+            raise SystemExit("--reward-token and --reward-distributor are required with generic --scan-chain-rewards")
+        rewards = scan_erc20_reward_transfers(
+            client,
+            token_contracts=args.reward_token,
+            distributor_addresses=args.reward_distributor,
+            from_block=_parse_block_arg(args.from_block),
+            to_block=_parse_block_arg(args.to_block),
+            chunk_size=args.log_chunk_size,
+            amount_decimals=args.reward_decimals,
+        )
     rows = scan_generic_evm_chain_fills(
         client,
         contracts=args.evidence_contract,
@@ -460,10 +491,12 @@ def _format_chain_evidence_table(rows: list[ChainEvidence]) -> str:
 
 
 def _format_chain_fill_summary_table(rows: list[ChainFillSummary]) -> str:
-    headers = ["venue", "chain", "maker", "fills", "filled", "fees", "reward", "reward/fill", "blocks", "proof"]
+    headers = ["risk", "level", "venue", "chain", "maker", "fills", "filled", "fees", "reward", "reward/fill", "blocks", "reasons", "proof"]
     lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _chain_fill_widths()))]
     for row in rows:
         values = [
+            f"{row.risk_score:.4f}",
+            row.risk_level,
             row.venue,
             str(row.chain_id),
             _shorten(row.maker, prefix=10, suffix=6),
@@ -473,6 +506,7 @@ def _format_chain_fill_summary_table(rows: list[ChainFillSummary]) -> str:
             _format_decimal(row.reward),
             _format_reward_fill_ratio(row.reward_to_fill_ratio),
             _format_block_range(row.blocks),
+            ",".join(row.reasons),
             ",".join(_shorten(tx, prefix=8, suffix=6) for tx in row.transaction_hashes[:2])
             or ",".join(_shorten(contract) for contract in row.contracts[:2]),
         ]
@@ -611,7 +645,7 @@ def _chain_evidence_widths() -> list[int]:
 
 
 def _chain_fill_widths() -> list[int]:
-    return [12, 7, 20, 6, 12, 10, 10, 12, 18, 45]
+    return [7, 9, 12, 7, 20, 6, 12, 10, 10, 12, 18, 52, 45]
 
 
 if __name__ == "__main__":

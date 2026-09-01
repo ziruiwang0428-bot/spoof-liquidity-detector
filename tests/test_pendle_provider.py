@@ -4,12 +4,30 @@ from spoof_liquidity_detector.providers.pendle import PendleProvider
 
 
 class FakePendleProvider(PendleProvider):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.calls = []
 
     def _get(self, path, query=None, base_url=None):
         self.calls.append((path, query, base_url))
+        if path == "/v2/limit-orders":
+            return {
+                "results": [
+                    {
+                        "id": "0xcore-active",
+                        "maker": "0xmakerA",
+                        "chainId": 42161,
+                        "yt": "0xmarket",
+                        "lnImpliedRate": "100000000000000000",
+                        "createdAt": "2026-07-24T09:00:00.000Z",
+                        "latestEventTimestamp": "2026-07-24T09:00:00.000Z",
+                        "isActive": True,
+                        "orderState": {"orderType": "LONG_YIELD", "notionalVolumeUSD": "1000"},
+                    }
+                ]
+            }
+        if path == "/v2/limit-orders/archived":
+            return {"results": []}
         if path == "/v1/limit-orders/incentive/configs":
             return {"configs": [{"chainId": 42161}]}
         if path == "/v1/limit-orders/incentive/user/aggregate":

@@ -44,6 +44,23 @@ class ChainFillSummaryTest(unittest.TestCase):
         self.assertEqual(rows[0].fee_paid, 0.03)
         self.assertAlmostEqual(rows[0].reward_to_fill_ratio, 0.1)
         self.assertEqual(rows[0].blocks, (100, 101))
+        self.assertEqual(rows[0].risk_level, "high")
+        self.assertGreaterEqual(rows[0].risk_score, 0.7)
+        self.assertIn("high_reward_per_chain_fill", rows[0].reasons)
+
+    def test_includes_reward_accounts_without_chain_fills(self):
+        rows = summarize_chain_fills(
+            [],
+            venue="demo-venue",
+            chain_id=1,
+            rewards={"0x1111111111111111111111111111111111111111": 5.0},
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].fill_count, 0)
+        self.assertEqual(rows[0].risk_level, "high")
+        self.assertEqual(rows[0].reward_to_fill_ratio, float("inf"))
+        self.assertIn("reward_without_chain_fills", rows[0].reasons)
 
 
 if __name__ == "__main__":

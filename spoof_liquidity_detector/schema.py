@@ -206,3 +206,7 @@ class ChainFillSummary:
     blocks: tuple[int, ...] = ()
     contracts: tuple[str, ...] = ()
     transaction_hashes: tuple[str, ...] = ()
+    risk_score: float = 0.0
+    risk_level: str = "unscored"
+    evidence_mode: str = "chain_fill"
+    reasons: tuple[str, ...] = ()

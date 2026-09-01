@@ -60,6 +60,26 @@ h1 {
   gap: 12px;
 }
 
+.market-scope {
+  padding: 12px;
+  border-left: 3px solid var(--accent);
+  background: #eef6f4;
+}
+
+.market-scope span,
+.market-scope p {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.market-scope strong {
+  display: block;
+  margin: 3px 0;
+  font-size: 15px;
+}
+
 .control-grid {
   grid-template-columns: 1fr 1fr;
 }
@@ -74,6 +94,20 @@ label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.check-control {
+  align-content: center;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  min-height: 38px;
+  padding-top: 18px;
+}
+
+.check-control input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
 }
 
 input,

@@ -161,6 +161,9 @@ class CliFormatterTest(unittest.TestCase):
                     fee_paid=1.25,
                     reward=50.0,
                     reward_to_fill_ratio=0.2,
+                    risk_score=0.91,
+                    risk_level="high",
+                    reasons=("high_reward_per_chain_fill",),
                     blocks=(100, 105),
                     transaction_hashes=("0x" + "b" * 64,),
                 )
@@ -171,6 +174,8 @@ class CliFormatterTest(unittest.TestCase):
         self.assertIn("250", table)
         self.assertIn("0.2", table)
         self.assertIn("100-105", table)
+        self.assertIn("0.9100", table)
+        self.assertIn("high_reward_per_chain_fill", table)
 
 
 if __name__ == "__main__":

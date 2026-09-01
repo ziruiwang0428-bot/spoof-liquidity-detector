@@ -123,7 +123,10 @@ class PendleProvider(OrderEventProvider):
         )
 
     def load_events(self) -> list[OrderEvent]:
-        orders = self.fetch_detection_orders()
+        return self.events_from_orders(self.fetch_detection_orders())
+
+    def events_from_orders(self, orders: list[dict[str, Any]]) -> list[OrderEvent]:
+        """Normalize an already-fetched order batch for repeatable API and chain auditing."""
         market_references = _build_market_references(orders)
 
         events: list[OrderEvent] = []
