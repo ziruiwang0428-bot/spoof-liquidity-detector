@@ -8,6 +8,7 @@ from spoof_liquidity_detector.schema import ChainEventEvidence, ChainEvidence
 
 DEFAULT_RPC_URLS = {
     1: "https://ethereum-rpc.publicnode.com",
+    137: "https://polygon-bor-rpc.publicnode.com",
     42161: "https://arb1.arbitrum.io/rpc",
 }
 
@@ -129,6 +130,7 @@ class EvmChainEvidenceClient:
         from_block: int | str,
         to_block: int | str,
         chunk_size: int | None = None,
+        topics: list[str | None] | None = None,
     ) -> list[dict[str, Any]]:
         if isinstance(from_block, int) and (isinstance(to_block, int) or to_block in {"latest", "safe", "finalized"}):
             end_block = self.block_number() if isinstance(to_block, str) else to_block
@@ -137,10 +139,10 @@ class EvmChainEvidenceClient:
                 start = from_block
                 while start <= end_block:
                     end = min(start + chunk_size - 1, end_block)
-                    rows.extend(self._get_logs_once(addresses=addresses, from_block=start, to_block=end))
+                    rows.extend(self._get_logs_once(addresses=addresses, from_block=start, to_block=end, topics=topics))
                     start = end + 1
                 return rows
-        return self._get_logs_once(addresses=addresses, from_block=from_block, to_block=to_block)
+        return self._get_logs_once(addresses=addresses, from_block=from_block, to_block=to_block, topics=topics)
 
     def block_number(self) -> int:
         return _hex_to_int(self._rpc("eth_blockNumber", []))
@@ -151,12 +153,15 @@ class EvmChainEvidenceClient:
         addresses: list[str],
         from_block: int | str,
         to_block: int | str,
+        topics: list[str | None] | None = None,
     ) -> list[dict[str, Any]]:
         params = {
             "address": addresses[0] if len(addresses) == 1 else addresses,
             "fromBlock": _block_param(from_block),
             "toBlock": _block_param(to_block),
         }
+        if topics:
+            params["topics"] = topics
         return list(self._rpc("eth_getLogs", [params]) or [])
 
     def _rpc(self, method: str, params: list[Any]) -> Any:

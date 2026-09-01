@@ -142,6 +142,7 @@ class ChainEventEvidence:
     token: str = ""
     taker: str = ""
     notional_volume: int | None = None
+    fee_paid: int | None = None
 
 
 @dataclass(frozen=True)
@@ -190,3 +191,18 @@ class AccountChainEvidence:
         if not self.event_counts:
             return ()
         return tuple(sorted(name for name, count in self.event_counts.items() if count > 0))
+
+
+@dataclass(frozen=True)
+class ChainFillSummary:
+    venue: str
+    chain_id: int
+    maker: str
+    fill_count: int
+    filled_notional: float
+    fee_paid: float
+    reward: float = 0.0
+    reward_to_fill_ratio: float = 0.0
+    blocks: tuple[int, ...] = ()
+    contracts: tuple[str, ...] = ()
+    transaction_hashes: tuple[str, ...] = ()

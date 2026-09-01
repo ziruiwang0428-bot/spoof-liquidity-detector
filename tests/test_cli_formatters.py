@@ -3,6 +3,7 @@ import unittest
 from spoof_liquidity_detector.cli import (
     _format_archive_table,
     _format_chain_evidence_table,
+    _format_chain_fill_summary_table,
     _format_pendle_incentives,
     _format_pendle_order_book,
     _format_pendle_orders,
@@ -10,7 +11,7 @@ from spoof_liquidity_detector.cli import (
     _format_polymarket_order_book,
 )
 from spoof_liquidity_detector.providers import ArchiveSnapshot
-from spoof_liquidity_detector.schema import ChainEventEvidence, ChainEvidence
+from spoof_liquidity_detector.schema import ChainEventEvidence, ChainEvidence, ChainFillSummary
 
 
 class CliFormatterTest(unittest.TestCase):
@@ -147,6 +148,29 @@ class CliFormatterTest(unittest.TestCase):
         self.assertIn("OrderFilledV2", table)
         self.assertIn("#7", table)
         self.assertIn("42", table)
+
+    def test_formats_chain_fill_summary(self):
+        table = _format_chain_fill_summary_table(
+            [
+                ChainFillSummary(
+                    venue="polymarket",
+                    chain_id=137,
+                    maker="0x1111111111111111111111111111111111111111",
+                    fill_count=3,
+                    filled_notional=250.0,
+                    fee_paid=1.25,
+                    reward=50.0,
+                    reward_to_fill_ratio=0.2,
+                    blocks=(100, 105),
+                    transaction_hashes=("0x" + "b" * 64,),
+                )
+            ]
+        )
+
+        self.assertIn("polymarket", table)
+        self.assertIn("250", table)
+        self.assertIn("0.2", table)
+        self.assertIn("100-105", table)
 
 
 if __name__ == "__main__":

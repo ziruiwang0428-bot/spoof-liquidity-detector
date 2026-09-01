@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 
 from spoof_liquidity_detector.accounts import AccountProfiler, load_account_economics
-from spoof_liquidity_detector.evidence import EvmChainEvidenceClient, summarize_account_chain_evidence
+from spoof_liquidity_detector.evidence import (
+    DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS,
+    EvmChainEvidenceClient,
+    scan_polymarket_chain_fills,
+    summarize_account_chain_evidence,
+)
 from spoof_liquidity_detector.pipeline import DetectionPipeline
 from spoof_liquidity_detector.providers import (
     ArchiveSnapshot,
@@ -14,7 +19,7 @@ from spoof_liquidity_detector.providers import (
     PolymarketLiveProvider,
     PolymarketProvider,
 )
-from spoof_liquidity_detector.schema import ChainEvidence
+from spoof_liquidity_detector.schema import ChainEvidence, ChainFillSummary
 
 DEFAULT_PENDLE_EVIDENCE_CONTRACTS = {
     42161: ["0x000000000000c9B3E2C3Ec88B1B4c0cD853f4321"],
@@ -43,12 +48,13 @@ def main() -> None:
     parser.add_argument("--list-incentives", action="store_true", help="List Pendle limit-order incentive configs.")
     parser.add_argument("--list-orders", action="store_true", help="List raw Pendle limit orders.")
     parser.add_argument("--order-book", action="store_true", help="List Pendle aggregated limit-order book entries.")
-    parser.add_argument("--chain-id", type=int, help="Pendle chain ID, for example 42161 for Arbitrum.")
+    parser.add_argument("--chain-id", type=int, help="EVM chain ID, for example 42161 for Arbitrum or 137 for Polygon.")
     parser.add_argument("--market", help="Pendle market address for --order-book.")
     parser.add_argument("--token-id", help="Polymarket CLOB token ID for --order-book.")
     parser.add_argument("--maker", help="Optional Pendle maker address filter for --list-orders.")
     parser.add_argument("--active", choices=["true", "false", "all"], default="true", help="Pendle active-order filter.")
     parser.add_argument("--confirm-chain-evidence", action="store_true", help="Confirm Pendle order transaction evidence on-chain.")
+    parser.add_argument("--chain-fills", action="store_true", help="Scan Polymarket on-chain fill events and aggregate by maker.")
     parser.add_argument("--rpc-url", help="Optional EVM JSON-RPC URL for --confirm-chain-evidence.")
     parser.add_argument("--evidence-contract", action="append", help="Optional contract address to scan with eth_getLogs.")
     parser.add_argument("--from-block", help="Optional start block for --evidence-contract log scans.")
@@ -107,6 +113,26 @@ def _run_polymarket_archive(args) -> None:
 
 
 def _run_polymarket_live(args) -> None:
+    if args.chain_fills:
+        chain_id = args.chain_id or 137
+        if args.from_block is None:
+            raise SystemExit("--from-block is required with --provider polymarket --chain-fills")
+        client = EvmChainEvidenceClient(chain_id=chain_id, rpc_url=args.rpc_url)
+        contracts = args.evidence_contract or DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS.get(chain_id)
+        if not contracts:
+            raise SystemExit(f"No default Polymarket exchange contracts for chain_id={chain_id}. Pass --evidence-contract.")
+        rewards = _load_reward_amounts(args.economics) if args.economics else None
+        rows = scan_polymarket_chain_fills(
+            client,
+            contracts=contracts,
+            from_block=_parse_block_arg(args.from_block),
+            to_block=_parse_block_arg(args.to_block),
+            chunk_size=args.log_chunk_size,
+            rewards=rewards,
+        )
+        print(_format_chain_fill_summary_table(rows[: args.top]))
+        return
+
     provider = PolymarketLiveProvider()
     if args.list_orders:
         markets = provider.list_markets(limit=args.top)
@@ -122,7 +148,8 @@ def _run_polymarket_live(args) -> None:
 
     raise SystemExit(
         "Polymarket live source configured. Use --list-orders to list active Gamma markets with CLOB token IDs, "
-        "or --order-book --token-id <clob-token-id> to fetch an aggregated CLOB order book."
+        "--order-book --token-id <clob-token-id> to fetch an aggregated CLOB order book, "
+        "or --chain-fills --from-block <block> to scan on-chain maker fills."
     )
 
 
@@ -224,6 +251,11 @@ def _parse_block_arg(value: str) -> int | str:
     if value.startswith("0x"):
         return int(value, 16)
     return int(value)
+
+
+def _load_reward_amounts(path: str) -> dict[str, float]:
+    economics = load_account_economics(path)
+    return {maker.lower(): row.subsidy for maker, row in economics.items()}
 
 
 def _format_archive_table(rows: list[ArchiveSnapshot]) -> str:
@@ -375,6 +407,27 @@ def _format_chain_evidence_table(rows: list[ChainEvidence]) -> str:
     return "\n".join(lines)
 
 
+def _format_chain_fill_summary_table(rows: list[ChainFillSummary]) -> str:
+    headers = ["venue", "chain", "maker", "fills", "filled", "fees", "reward", "reward/fill", "blocks", "proof"]
+    lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _chain_fill_widths()))]
+    for row in rows:
+        values = [
+            row.venue,
+            str(row.chain_id),
+            _shorten(row.maker, prefix=10, suffix=6),
+            str(row.fill_count),
+            _format_decimal(row.filled_notional),
+            _format_decimal(row.fee_paid),
+            _format_decimal(row.reward),
+            _format_reward_fill_ratio(row.reward_to_fill_ratio),
+            _format_block_range(row.blocks),
+            ",".join(_shorten(tx, prefix=8, suffix=6) for tx in row.transaction_hashes[:2])
+            or ",".join(_shorten(contract) for contract in row.contracts[:2]),
+        ]
+        lines.append("  ".join(value.ljust(width) for value, width in zip(values, _chain_fill_widths())))
+    return "\n".join(lines)
+
+
 def _event_summary(event) -> str:
     return event.event_name.split(":")[0]
 
@@ -383,6 +436,14 @@ def _event_proof(event) -> str:
     tx = _shorten(event.transaction_hash, prefix=8, suffix=6) if event.transaction_hash else "no-tx"
     index = "" if event.log_index is None else f"#{event.log_index}"
     return f"{_shorten(event.contract)}:{tx}{index}"
+
+
+def _format_block_range(blocks: tuple[int, ...]) -> str:
+    if not blocks:
+        return ""
+    if len(blocks) == 1:
+        return str(blocks[0])
+    return f"{blocks[0]}-{blocks[-1]}"
 
 
 def _format_polymarket_markets(rows) -> str:
@@ -495,6 +556,10 @@ def _polymarket_book_widths() -> list[int]:
 
 def _chain_evidence_widths() -> list[int]:
     return [30, 15, 15, 4, 5, 24, 18, 80]
+
+
+def _chain_fill_widths() -> list[int]:
+    return [12, 7, 20, 6, 12, 10, 10, 12, 18, 45]
 
 
 if __name__ == "__main__":
