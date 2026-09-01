@@ -122,6 +122,9 @@ class AccountRiskProfile:
     chain_evidence_matched_log_count: int = 0
     chain_evidence_ratio: float = 0.0
     chain_evidence_events: tuple[str, ...] = ()
+    chain_fill_event_count: int = 0
+    chain_filled_notional: float = 0.0
+    reward_to_chain_fill_ratio: float = 0.0
     chain_locked: bool = False
 
 
@@ -170,6 +173,8 @@ class AccountChainEvidence:
     order_count: int
     confirmed_order_count: int
     matched_log_count: int
+    fill_event_count: int
+    filled_notional: float
     blocks: tuple[int, ...]
     contracts: tuple[str, ...]
     event_counts: dict[str, int] | None = None

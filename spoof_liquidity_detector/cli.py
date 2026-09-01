@@ -266,7 +266,21 @@ def _format_order_table(rows) -> str:
 
 
 def _format_account_table(rows) -> str:
-    headers = ["risk", "locked", "maker", "orders", "avoid", "far_ratio", "chain", "logs", "events", "profit", "apy", "reasons"]
+    headers = [
+        "risk",
+        "locked",
+        "maker",
+        "orders",
+        "avoid",
+        "far_ratio",
+        "chain",
+        "fills",
+        "reward/fill",
+        "events",
+        "profit",
+        "apy",
+        "reasons",
+    ]
     lines = ["  ".join(header.ljust(width) for header, width in zip(headers, _account_widths()))]
     for row in rows:
         values = [
@@ -277,7 +291,8 @@ def _format_account_table(rows) -> str:
             f"{row.near_touch_cancel_rate:.2%}",
             f"{row.far_order_ratio:.2%}",
             f"{row.chain_evidence_ratio:.2%}",
-            str(row.chain_evidence_matched_log_count),
+            str(row.chain_fill_event_count),
+            _format_reward_fill_ratio(row.reward_to_chain_fill_ratio),
             ",".join(row.chain_evidence_events),
             f"{row.net_profit:.2f}",
             f"{row.annualized_return:.2%}",
@@ -440,12 +455,18 @@ def _format_decimal(value: object) -> str:
         return str(value)
 
 
+def _format_reward_fill_ratio(value: float) -> str:
+    if value == float("inf"):
+        return "inf"
+    return _format_decimal(value)
+
+
 def _order_widths() -> list[int]:
     return [7, 8, 6, 15, 44, 9, 18, 48]
 
 
 def _account_widths() -> list[int]:
-    return [7, 8, 44, 6, 8, 9, 8, 5, 20, 10, 9, 80]
+    return [7, 8, 44, 6, 8, 9, 8, 6, 12, 20, 10, 9, 88]
 
 
 def _archive_widths() -> list[int]:

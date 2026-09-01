@@ -43,6 +43,8 @@ class AccountProfilerTest(unittest.TestCase):
                     order_count=2,
                     confirmed_order_count=2,
                     matched_log_count=2,
+                    fill_event_count=0,
+                    filled_notional=0.0,
                     blocks=(42, 43),
                     contracts=("0x2222222222222222222222222222222222222222",),
                 )
@@ -53,7 +55,36 @@ class AccountProfilerTest(unittest.TestCase):
         self.assertTrue(by_maker["0xAlpha"].chain_locked)
         self.assertEqual(by_maker["0xAlpha"].chain_evidence_ratio, 1.0)
         self.assertIn("chain_order_log_matched", by_maker["0xAlpha"].reasons)
+        self.assertIn("reward_without_chain_fills", by_maker["0xAlpha"].reasons)
         self.assertIn("chain_evidence_locked_account", by_maker["0xAlpha"].reasons)
+
+    def test_account_profiles_flag_high_reward_per_chain_fill(self):
+        provider = CsvOrderEventProvider(Path("data/sample_order_events.csv"))
+        economics = load_account_economics(Path("data/sample_account_economics.csv"))
+        order_results = DetectionPipeline(provider).run()
+        profiles = AccountProfiler().profile(
+            order_results,
+            economics=economics,
+            chain_evidence={
+                "0xAlpha": AccountChainEvidence(
+                    maker="0xAlpha",
+                    order_count=2,
+                    confirmed_order_count=2,
+                    matched_log_count=2,
+                    fill_event_count=1,
+                    filled_notional=1000.0,
+                    blocks=(42, 43),
+                    contracts=("0x2222222222222222222222222222222222222222",),
+                    event_counts={"OrderFilledV2": 1},
+                )
+            },
+        )
+        by_maker = {profile.maker: profile for profile in profiles}
+
+        self.assertEqual(by_maker["0xAlpha"].chain_fill_event_count, 1)
+        self.assertEqual(by_maker["0xAlpha"].chain_filled_notional, 1000.0)
+        self.assertAlmostEqual(by_maker["0xAlpha"].reward_to_chain_fill_ratio, 0.82, places=2)
+        self.assertIn("high_reward_per_chain_fill", by_maker["0xAlpha"].reasons)
 
 
 if __name__ == "__main__":
