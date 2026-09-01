@@ -19,10 +19,11 @@
           <select id="mode">
             <option value="sample">Sample account risk</option>
             <option value="polymarket">Polymarket chain fills</option>
+            <option value="generic">Generic EVM market</option>
           </select>
         </div>
 
-        <div class="control-grid">
+        <div class="control-grid chain-controls">
           <label>
             Chain
             <input id="chainId" inputmode="numeric" value="137" />
@@ -47,6 +48,57 @@
             RPC URL
             <input id="rpcUrl" placeholder="default" />
           </label>
+          <label>
+            Reward CSV
+            <input id="economicsPath" placeholder="optional path" />
+          </label>
+        </div>
+
+        <div class="control-grid generic-controls">
+          <label>
+            Venue
+            <input id="venue" value="custom-evm" />
+          </label>
+          <label>
+            Contract
+            <input id="contract" placeholder="0x..." />
+          </label>
+          <label>
+            Fill topic
+            <input id="fillTopic" placeholder="0x..." />
+          </label>
+          <label>
+            Notional
+            <select id="notionalSource">
+              <option value="max">max amount</option>
+              <option value="maker">maker amount</option>
+              <option value="taker">taker amount</option>
+            </select>
+          </label>
+          <label>
+            Maker topic
+            <input id="makerTopicIndex" inputmode="numeric" value="2" />
+          </label>
+          <label>
+            Taker topic
+            <input id="takerTopicIndex" inputmode="numeric" value="3" />
+          </label>
+          <label>
+            Maker amount word
+            <input id="makerAmountWord" inputmode="numeric" value="2" />
+          </label>
+          <label>
+            Taker amount word
+            <input id="takerAmountWord" inputmode="numeric" value="3" />
+          </label>
+          <label>
+            Fee word
+            <input id="feeWord" inputmode="numeric" value="4" />
+          </label>
+          <label>
+            Decimals
+            <input id="amountDecimals" inputmode="numeric" value="6" />
+          </label>
         </div>
 
         <button id="runButton" type="button">Run Scan</button>
@@ -54,6 +106,24 @@
       </aside>
 
       <section class="workspace">
+        <div class="method-band">
+          <div>
+            <span>1</span>
+            <strong>Pure chain</strong>
+            <p>Orders, fills, cancels, maker, funds, and rewards are all taken from chain or reproducible indexers.</p>
+          </div>
+          <div>
+            <span>2</span>
+            <strong>Chain + API</strong>
+            <p>Off-chain order books explain behavior; chain data confirms fills, cancels, maker activity, funds, and rewards.</p>
+          </div>
+          <div>
+            <span>3</span>
+            <strong>Reward vs fill</strong>
+            <p>Accounts with high rewards and low verified fill contribution become review candidates.</p>
+          </div>
+        </div>
+
         <div class="summary-strip" aria-live="polite">
           <div>
             <span class="summary-label">Rows</span>

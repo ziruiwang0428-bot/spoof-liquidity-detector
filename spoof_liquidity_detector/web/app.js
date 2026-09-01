@@ -11,6 +11,17 @@ const els = {
   toBlock: document.querySelector("#toBlock"),
   chunkSize: document.querySelector("#chunkSize"),
   rpcUrl: document.querySelector("#rpcUrl"),
+  economicsPath: document.querySelector("#economicsPath"),
+  venue: document.querySelector("#venue"),
+  contract: document.querySelector("#contract"),
+  fillTopic: document.querySelector("#fillTopic"),
+  notionalSource: document.querySelector("#notionalSource"),
+  makerTopicIndex: document.querySelector("#makerTopicIndex"),
+  takerTopicIndex: document.querySelector("#takerTopicIndex"),
+  makerAmountWord: document.querySelector("#makerAmountWord"),
+  takerAmountWord: document.querySelector("#takerAmountWord"),
+  feeWord: document.querySelector("#feeWord"),
+  amountDecimals: document.querySelector("#amountDecimals"),
   runButton: document.querySelector("#runButton"),
   status: document.querySelector("#status"),
   rowCount: document.querySelector("#rowCount"),
@@ -76,6 +87,24 @@ function buildUrl() {
   if (state.mode === "sample") {
     return `/api/sample/accounts?top=${top}`;
   }
+  const params = buildChainParams();
+  if (state.mode === "generic") {
+    params.set("venue", els.venue.value || "custom-evm");
+    params.set("contract", els.contract.value.trim());
+    params.set("fill_topic", els.fillTopic.value.trim());
+    params.set("notional_source", els.notionalSource.value || "max");
+    params.set("maker_topic_index", els.makerTopicIndex.value || "2");
+    params.set("taker_topic_index", els.takerTopicIndex.value || "3");
+    params.set("maker_amount_word", els.makerAmountWord.value || "2");
+    params.set("taker_amount_word", els.takerAmountWord.value || "3");
+    params.set("fee_word", els.feeWord.value || "4");
+    params.set("amount_decimals", els.amountDecimals.value || "6");
+    return `/api/evm/fills?${params.toString()}`;
+  }
+  return `/api/polymarket/fills?${params.toString()}`;
+}
+
+function buildChainParams() {
   const params = new URLSearchParams({
     chain_id: els.chainId.value || "137",
     from_block: els.fromBlock.value,
@@ -86,7 +115,10 @@ function buildUrl() {
   if (els.rpcUrl.value.trim()) {
     params.set("rpc_url", els.rpcUrl.value.trim());
   }
-  return `/api/polymarket/fills?${params.toString()}`;
+  if (els.economicsPath.value.trim()) {
+    params.set("economics_path", els.economicsPath.value.trim());
+  }
+  return params;
 }
 
 async function fetchJson(url) {
@@ -120,7 +152,7 @@ function renderRow(row, columns) {
 
 function renderSummary() {
   els.rowCount.textContent = String(state.rows.length);
-  els.activeMode.textContent = state.mode === "sample" ? "Sample" : "Polymarket";
+  els.activeMode.textContent = modeLabel();
   const maxRisk = Math.max(0, ...state.rows.map((row) => Number(row.account_risk_score || 0)));
   const maxFilled = Math.max(0, ...state.rows.map((row) => Number(row.filled_notional || row.chain_filled_notional || 0)));
   els.maxRisk.textContent = maxRisk ? maxRisk.toFixed(3) : "-";
@@ -132,6 +164,17 @@ function updateModeControls() {
   chainControls.forEach((input) => {
     input.disabled = els.mode.value === "sample";
   });
+  els.economicsPath.disabled = els.mode.value === "sample";
+  document.querySelector(".generic-controls").classList.toggle("is-hidden", els.mode.value !== "generic");
+  document.querySelectorAll(".generic-controls input, .generic-controls select").forEach((input) => {
+    input.disabled = els.mode.value !== "generic";
+  });
+}
+
+function modeLabel() {
+  if (state.mode === "sample") return "Sample";
+  if (state.mode === "generic") return "Generic EVM";
+  return "Polymarket";
 }
 
 function setBusy(value) {

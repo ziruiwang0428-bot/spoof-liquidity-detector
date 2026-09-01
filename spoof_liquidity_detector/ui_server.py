@@ -13,6 +13,8 @@ from spoof_liquidity_detector.accounts import load_account_economics
 from spoof_liquidity_detector.evidence import (
     DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS,
     EvmChainEvidenceClient,
+    GenericFillEventConfig,
+    scan_generic_evm_chain_fills,
     scan_polymarket_chain_fills,
 )
 from spoof_liquidity_detector.pipeline import DetectionPipeline
@@ -50,6 +52,7 @@ def polymarket_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]]
     if not contracts:
         raise ValueError(f"No Polymarket contracts configured for chain_id={chain_id}.")
 
+    rewards = _load_reward_amounts_from_params(params)
     client = EvmChainEvidenceClient(chain_id=chain_id, rpc_url=rpc_url)
     rows = scan_polymarket_chain_fills(
         client,
@@ -57,6 +60,43 @@ def polymarket_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]]
         from_block=from_block,
         to_block=to_block,
         chunk_size=chunk_size,
+        rewards=rewards,
+    )
+    return [_serialize_dataclass(row) for row in rows[:top]]
+
+
+def generic_evm_chain_fills(params: dict[str, list[str]]) -> list[dict[str, Any]]:
+    chain_id = _required_int_param(params, "chain_id")
+    from_block = _required_int_param(params, "from_block")
+    to_block = _block_param(_str_param(params, "to_block", "latest"))
+    top = _int_param(params, "top", 10)
+    chunk_size = _int_param(params, "chunk_size", 1000)
+    rpc_url = _str_param(params, "rpc_url", "") or None
+    contracts = params.get("contract") or []
+    if not contracts:
+        raise ValueError("contract is required for generic EVM scans")
+
+    config = GenericFillEventConfig(
+        venue=_str_param(params, "venue", "custom-evm"),
+        event_topic=_required_str_param(params, "fill_topic").lower(),
+        maker_topic_index=_int_param(params, "maker_topic_index", 2),
+        taker_topic_index=_int_param(params, "taker_topic_index", 3),
+        maker_amount_word=_int_param(params, "maker_amount_word", 2),
+        taker_amount_word=_int_param(params, "taker_amount_word", 3),
+        fee_word=_optional_word_param(params, "fee_word", 4),
+        notional_source=_str_param(params, "notional_source", "max"),  # type: ignore[arg-type]
+        amount_decimals=_int_param(params, "amount_decimals", 6),
+    )
+    rewards = _load_reward_amounts_from_params(params)
+    client = EvmChainEvidenceClient(chain_id=chain_id, rpc_url=rpc_url)
+    rows = scan_generic_evm_chain_fills(
+        client,
+        contracts=contracts,
+        config=config,
+        from_block=from_block,
+        to_block=to_block,
+        chunk_size=chunk_size,
+        rewards=rewards,
     )
     return [_serialize_dataclass(row) for row in rows[:top]]
 
@@ -81,6 +121,8 @@ def _make_handler(web_root: Path):
                     payload = {"rows": sample_account_profiles(top=_int_param(params, "top", 10))}
                 elif path == "/api/polymarket/fills":
                     payload = {"rows": polymarket_chain_fills(params)}
+                elif path == "/api/evm/fills":
+                    payload = {"rows": generic_evm_chain_fills(params)}
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
                     return
@@ -125,8 +167,31 @@ def _required_int_param(params: dict[str, list[str]], name: str) -> int:
     return int(value)
 
 
+def _required_str_param(params: dict[str, list[str]], name: str) -> str:
+    value = params.get(name, [""])[0].strip()
+    if not value:
+        raise ValueError(f"{name} is required")
+    return value
+
+
 def _str_param(params: dict[str, list[str]], name: str, default: str) -> str:
     return params.get(name, [default])[0]
+
+
+def _optional_word_param(params: dict[str, list[str]], name: str, default: int) -> int | None:
+    value = _int_param(params, name, default)
+    return None if value < 0 else value
+
+
+def _load_reward_amounts_from_params(params: dict[str, list[str]]) -> dict[str, float] | None:
+    path_value = _str_param(params, "economics_path", "").strip()
+    if not path_value:
+        return None
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    economics = load_account_economics(path)
+    return {maker.lower(): row.subsidy for maker, row in economics.items()}
 
 
 def _block_param(value: str) -> int | str:
