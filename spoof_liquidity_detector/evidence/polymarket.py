@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-from collections import defaultdict
 from typing import Iterable
 
 from spoof_liquidity_detector.evidence.evm import (
@@ -11,6 +9,7 @@ from spoof_liquidity_detector.evidence.evm import (
     _hex_to_int,
     _word_to_int,
 )
+from spoof_liquidity_detector.evidence.fills import summarize_chain_fills
 from spoof_liquidity_detector.schema import ChainEventEvidence, ChainFillSummary
 
 POLYMARKET_USDC_DECIMALS = 6
@@ -57,32 +56,13 @@ def summarize_polymarket_chain_fills(
     chain_id: int,
     rewards: dict[str, float] | None = None,
 ) -> list[ChainFillSummary]:
-    rewards = {_normalize_address(maker): reward for maker, reward in (rewards or {}).items()}
-    grouped: dict[str, list[ChainEventEvidence]] = defaultdict(list)
-    for event in events:
-        grouped[_normalize_address(event.maker)].append(event)
-
-    rows: list[ChainFillSummary] = []
-    for maker, maker_events in grouped.items():
-        filled_notional = sum((event.notional_volume or 0) / 10**POLYMARKET_USDC_DECIMALS for event in maker_events)
-        fee_paid = sum((event.fee_paid or 0) / 10**POLYMARKET_USDC_DECIMALS for event in maker_events)
-        reward = rewards.get(maker, 0.0)
-        rows.append(
-            ChainFillSummary(
-                venue="polymarket",
-                chain_id=chain_id,
-                maker=maker,
-                fill_count=len(maker_events),
-                filled_notional=filled_notional,
-                fee_paid=fee_paid,
-                reward=reward,
-                reward_to_fill_ratio=_reward_to_fill_ratio(reward, filled_notional, len(maker_events)),
-                blocks=tuple(sorted({event.block_number for event in maker_events if event.block_number is not None})),
-                contracts=tuple(sorted({event.contract for event in maker_events if event.contract})),
-                transaction_hashes=tuple(dict.fromkeys(event.transaction_hash for event in maker_events if event.transaction_hash)),
-            )
-        )
-    return sorted(rows, key=lambda row: (_sort_ratio(row.reward_to_fill_ratio), row.filled_notional), reverse=True)
+    return summarize_chain_fills(
+        events,
+        venue="polymarket",
+        chain_id=chain_id,
+        amount_decimals=POLYMARKET_USDC_DECIMALS,
+        rewards=rewards,
+    )
 
 
 def decode_polymarket_fill_event(log: dict) -> ChainEventEvidence | None:
@@ -137,20 +117,6 @@ def _collateral_amount(words: list[str], maker_amount: int, taker_amount: int) -
 
 def _looks_like_v2_fill(words: list[str]) -> bool:
     return len(words) >= 7 and _word_to_int(words[0]) in {0, 1}
-
-
-def _reward_to_fill_ratio(reward: float, filled_notional: float, fill_count: int) -> float:
-    if reward <= 0:
-        return 0.0
-    if filled_notional > 0:
-        return reward / filled_notional
-    if fill_count > 0:
-        return reward / fill_count
-    return math.inf
-
-
-def _sort_ratio(value: float) -> float:
-    return 1e18 if value == math.inf else value
 
 
 def _normalize_address(value: str) -> str:

@@ -8,6 +8,8 @@ from spoof_liquidity_detector.accounts import AccountProfiler, load_account_econ
 from spoof_liquidity_detector.evidence import (
     DEFAULT_POLYMARKET_EXCHANGE_CONTRACTS,
     EvmChainEvidenceClient,
+    GenericFillEventConfig,
+    scan_generic_evm_chain_fills,
     scan_polymarket_chain_fills,
     summarize_account_chain_evidence,
 )
@@ -30,7 +32,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Detect suspicious fleeting liquidity from order events.")
     parser.add_argument(
         "--provider",
-        choices=["csv", "polymarket", "polymarket-archive", "pendle"],
+        choices=["csv", "evm", "polymarket", "polymarket-archive", "pendle"],
         default="csv",
         help="Data source to use. CSV runs detection; archive providers expose real data files.",
     )
@@ -55,6 +57,15 @@ def main() -> None:
     parser.add_argument("--active", choices=["true", "false", "all"], default="true", help="Pendle active-order filter.")
     parser.add_argument("--confirm-chain-evidence", action="store_true", help="Confirm Pendle order transaction evidence on-chain.")
     parser.add_argument("--chain-fills", action="store_true", help="Scan Polymarket on-chain fill events and aggregate by maker.")
+    parser.add_argument("--venue", default="custom-evm", help="Venue name for generic --provider evm scans.")
+    parser.add_argument("--fill-topic", help="Topic0 hash for the generic EVM fill event.")
+    parser.add_argument("--maker-topic-index", type=int, default=2, help="Indexed topic position containing maker address.")
+    parser.add_argument("--taker-topic-index", type=int, default=3, help="Indexed topic position containing taker address.")
+    parser.add_argument("--maker-amount-word", type=int, default=2, help="Data word position containing maker fill amount.")
+    parser.add_argument("--taker-amount-word", type=int, default=3, help="Data word position containing taker fill amount.")
+    parser.add_argument("--fee-word", type=int, default=4, help="Data word position containing fee amount; use -1 if unavailable.")
+    parser.add_argument("--notional-source", choices=["maker", "taker", "max"], default="max", help="Which decoded amount to treat as filled notional.")
+    parser.add_argument("--amount-decimals", type=int, default=6, help="Token decimals for filled notional and fee display.")
     parser.add_argument("--rpc-url", help="Optional EVM JSON-RPC URL for --confirm-chain-evidence.")
     parser.add_argument("--evidence-contract", action="append", help="Optional contract address to scan with eth_getLogs.")
     parser.add_argument("--from-block", help="Optional start block for --evidence-contract log scans.")
@@ -72,6 +83,10 @@ def main() -> None:
 
     if args.provider == "pendle":
         _run_pendle(args)
+        return
+
+    if args.provider == "evm":
+        _run_generic_evm(args)
         return
 
     if not args.input:
@@ -151,6 +166,43 @@ def _run_polymarket_live(args) -> None:
         "--order-book --token-id <clob-token-id> to fetch an aggregated CLOB order book, "
         "or --chain-fills --from-block <block> to scan on-chain maker fills."
     )
+
+
+def _run_generic_evm(args) -> None:
+    if not args.chain_fills:
+        raise SystemExit("--chain-fills is required with --provider evm")
+    if args.chain_id is None:
+        raise SystemExit("--chain-id is required with --provider evm")
+    if not args.evidence_contract:
+        raise SystemExit("--evidence-contract is required with --provider evm")
+    if not args.fill_topic:
+        raise SystemExit("--fill-topic is required with --provider evm")
+    if args.from_block is None:
+        raise SystemExit("--from-block is required with --provider evm")
+
+    config = GenericFillEventConfig(
+        venue=args.venue,
+        event_topic=args.fill_topic,
+        maker_topic_index=args.maker_topic_index,
+        taker_topic_index=args.taker_topic_index,
+        maker_amount_word=args.maker_amount_word,
+        taker_amount_word=args.taker_amount_word,
+        fee_word=None if args.fee_word < 0 else args.fee_word,
+        notional_source=args.notional_source,
+        amount_decimals=args.amount_decimals,
+    )
+    client = EvmChainEvidenceClient(chain_id=args.chain_id, rpc_url=args.rpc_url)
+    rewards = _load_reward_amounts(args.economics) if args.economics else None
+    rows = scan_generic_evm_chain_fills(
+        client,
+        contracts=args.evidence_contract,
+        config=config,
+        from_block=_parse_block_arg(args.from_block),
+        to_block=_parse_block_arg(args.to_block),
+        chunk_size=args.log_chunk_size,
+        rewards=rewards,
+    )
+    print(_format_chain_fill_summary_table(rows[: args.top]))
 
 
 def _run_pendle(args) -> None:
